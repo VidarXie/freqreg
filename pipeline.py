@@ -7,8 +7,9 @@ from typing import Dict, Any
 from config import NeRFConfig
 from trainer import NeRFTrainer
 from MLEtrainer import MLETrainer
-from BAtrainer import BATrainer
-from evaluator import NeRFEvaluator
+from BAtrainer import BATrainer, BAEvaluator
+# from evaluator import NeRFEvaluator
+from utils.pose_utils import sim3_align_errors
 
 
 class NeRFPipeline:
@@ -28,7 +29,7 @@ class NeRFPipeline:
         # Initialize trainer and evaluator
         self.trainer = BATrainer(config)
         # self.trainer = MLETrainer(config)
-        self.evaluator = NeRFEvaluator(self.trainer, save_images=True)
+        self.evaluator = BAEvaluator(self.trainer, save_images=True)
 
         # Training history
         self.training_history = []
@@ -54,6 +55,11 @@ class NeRFPipeline:
 
             # Log training metrics
             if self.trainer.should_print() and verbose:
+                te, re = self.trainer.get_pose_error()
+                metrics.update({
+                    "translation_error": te.mean().item(),
+                    "rotation_error": re.mean().item(),
+                })
                 self.trainer.print_training_stats(metrics)
 
             # Store metrics

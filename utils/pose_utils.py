@@ -55,7 +55,6 @@ class Pose:
         pose_new = self(R=R_new, t=t_new)
         return pose_new
 
-    @torch.no_grad()
     def to_matrix(self, pose):
         if not isinstance(pose, torch.Tensor):
             pose = torch.tensor(pose)
@@ -107,4 +106,4 @@ def sim3_align_errors(gt, est):
     Rerr = torch.einsum('nij,njk->nik', gt[:, :, :3].transpose(1,2), Ra)
     tr = Rerr.diagonal(dim1=1, dim2=2).sum(1)
     re = torch.arccos(((tr - 1.0) * 0.5).clamp(-1.0, 1.0)) * (180.0 / torch.pi)
-    return out, te, re
+    return te, re, R0, s, t
