@@ -177,7 +177,7 @@ class BATrainer(NeRFTrainer):
         y = data["y"]
 
 
-        c2w_refined_pose = self.get_pose(c2w, self.se3_noise_pose[image_id], self.se3_refine[image_id])
+        c2w_refined_pose = self.get_pose_by_camera()[image_id]
         matrix_4x4 = POSE_.to_matrix(c2w_refined_pose)  # [:,4,4]]
 
         # Generate rays
@@ -263,7 +263,7 @@ class BATrainer(NeRFTrainer):
 
         
 class BAEvaluator(NeRFEvaluator):
-    def evaluate(self, verbose = True):
+    def evaluate(self, verbose=True):
         self.trainer.radiance_field.eval()
         self.trainer.estimator.eval()
 
@@ -275,7 +275,7 @@ class BAEvaluator(NeRFEvaluator):
             if verbose
             else range(len(self.trainer.test_dataset))
         )
-
+        align_R0, align_s, align_t = self.trainer.get_pose_align()
         with torch.no_grad():
             for i in iterator:
                 data = self.trainer.test_dataset[i]
@@ -294,9 +294,9 @@ class BAEvaluator(NeRFEvaluator):
                 pixels = data["pixels"]
 
                 c2w = data["c2w"]
-                self.align_R0, self.align_s, self.align_t = self.trainer.get_pose_align()
-                c2w_R = c2w[..., :3, :3] @ self.align_R0
-                c2w_t = (c2w[..., :3, 3] - self.align_t) / self.align_s @ self.align_R0
+                
+                c2w_R = c2w[..., :3, :3] @ align_R0
+                c2w_t = (c2w[..., :3, 3] - align_t) / align_s @ align_R0
                 c2w_aligned = torch.cat([c2w_R, c2w_t[..., None]], dim=-1)
                 image_id = data["image_id"]
                 x = data["x"]

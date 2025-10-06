@@ -8,8 +8,6 @@ from config import NeRFConfig
 from trainer import NeRFTrainer
 from MLEtrainer import MLETrainer
 from BAtrainer import BATrainer, BAEvaluator
-# from evaluator import NeRFEvaluator
-from utils.pose_utils import sim3_align_errors
 
 
 class NeRFPipeline:
