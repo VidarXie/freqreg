@@ -294,8 +294,7 @@ class BAEvaluator(NeRFEvaluator):
                 pixels = data["pixels"]
 
                 c2w = data["c2w"]
-                
-                c2w_R = c2w[..., :3, :3] @ align_R0
+                c2w_R = torch.einsum('ij,njk->nik', align_R0.t(), c2w[..., :3, :3])
                 c2w_t = (c2w[..., :3, 3] - align_t) / align_s @ align_R0
                 c2w_aligned = torch.cat([c2w_R, c2w_t[..., None]], dim=-1)
                 image_id = data["image_id"]
