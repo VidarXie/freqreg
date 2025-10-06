@@ -11,7 +11,7 @@ import torch
 import torch.nn.functional as F
 import tqdm
 from trainer import NeRFTrainer
-from utils.render_utils import render_image_with_propnet, generate_camera_rays
+from utils.render_utils import render_image_with_propnet, generate_camera_rays, render_image_with_occgrid
 
 
 class NeRFEvaluator:
@@ -47,8 +47,6 @@ class NeRFEvaluator:
         """
         # Set models to evaluation mode
         self.trainer.radiance_field.eval()
-        for p in self.trainer.proposal_networks:
-            p.eval()
         self.trainer.estimator.eval()
 
         psnrs = []
@@ -86,21 +84,16 @@ class NeRFEvaluator:
                 rays = generate_camera_rays(x, y, c2w, self.trainer.test_dataset)
 
                 # Render image
-                rgb, acc, depth, _ = render_image_with_propnet(
+                rgb, acc, depth, n_rendering_samples = render_image_with_occgrid(
                     self.trainer.radiance_field,
-                    self.trainer.proposal_networks,
                     self.trainer.estimator,
                     rays,
                     # rendering options
-                    num_samples=self.config.model.num_samples,
-                    num_samples_per_prop=self.config.model.num_samples_per_prop,
                     near_plane=self.config.scene_config.near_plane,
-                    far_plane=self.config.scene_config.far_plane,
-                    sampling_type=self.config.model.sampling_type,
-                    opaque_bkgd=self.config.model.opaque_bkgd,
+                    render_step_size=self.trainer.render_step_size,
                     render_bkgd=render_bkgd,
-                    # test options
-                    test_chunk_size=self.config.test_chunk_size,
+                    cone_angle=0.004,
+                    alpha_thre=0.01,
                 )
 
                 # Compute metrics

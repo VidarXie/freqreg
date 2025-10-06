@@ -156,7 +156,6 @@ def render_image_with_occgrid(
         sum(n_rendering_samples),
     )
 
-
 def render_image_with_propnet(
     # scene
     radiance_field: torch.nn.Module,

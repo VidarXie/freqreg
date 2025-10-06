@@ -10,15 +10,15 @@ import torch.nn.functional as F
 
 from config import NeRFConfig
 from utils.render_utils import (
-    render_image_with_propnet,
-    generate_camera_rays,
+    render_image_with_occgrid,
     generate_camera_rays_with_perturbation
 )
 
-from trainer import NeRFTrainer
+from trainer import NeRFTrainer, NGPRadianceField
 
 from utils.lie_utils import LIE_
-from utils.pose_utils import POSE_, MulPose
+from utils.pose_utils import POSE_
+from nerfacc.estimators.occ_grid import OccGridEstimator
 
 
 class BATrainer(NeRFTrainer):
@@ -34,7 +34,20 @@ class BATrainer(NeRFTrainer):
         self.init_level = 4.0
 
     def _setup_models(self):
-        super()._setup_models()
+        """Initialize radiance field and proposal networks."""
+        aabb = self.config.to_torch_aabb()
+
+        # NOTE: hard-coded grid resolution and levels
+        grid_resolution = (128, 128, 128)
+        grid_nlvl = 4
+        self.render_step_size = 5e-3
+        self.estimator = OccGridEstimator(
+            roi_aabb=aabb, resolution=grid_resolution, levels=grid_nlvl
+        ).to(self.device)
+        # Create main radiance field
+        self.radiance_field = NGPRadianceField(
+            aabb=aabb, unbounded=self.config.scene_config.unbounded
+        ).to(self.device)
 
         # Add noise to camera poses for bundle adjustment
         se3_noise = (
@@ -50,7 +63,35 @@ class BATrainer(NeRFTrainer):
 
     def _setup_optimizers(self):
         """Initialize optimizers and schedulers."""
-        super()._setup_optimizers()
+        self.optimizer = torch.optim.Adam(
+            self.radiance_field.parameters(),
+            lr=self.config.training.learning_rate,
+            eps=self.config.training.eps,
+            weight_decay=self.config.training.weight_decay,
+        )
+
+        # Schedulers
+        milestones = [
+            self.config.training.max_steps // 2,
+            self.config.training.max_steps * 3 // 4,
+            self.config.training.max_steps * 9 // 10,
+        ]
+
+        self.scheduler = torch.optim.lr_scheduler.ChainedScheduler(
+            [
+                torch.optim.lr_scheduler.LinearLR(
+                    self.optimizer, start_factor=0.01, total_iters=100
+                ),
+                torch.optim.lr_scheduler.MultiStepLR(
+                    self.optimizer, milestones=milestones, gamma=0.33
+                ),
+            ]
+        )
+
+        # Gradient scaler
+        self.grad_scaler = torch.cuda.amp.GradScaler(
+            self.config.training.grad_scaler_init
+        )
 
         self.pose_optimizer = torch.optim.Adam([self.se3_refine], lr=0.001)
 
@@ -68,6 +109,16 @@ class BATrainer(NeRFTrainer):
             gamma=0.33,
         )
 
+    def get_pose(self, c2w, noise, refine):
+        # Add noise to camera pose
+        c2w_pose = POSE_.from_matrix(c2w)  # [:,3,4]
+        c2w_perturbed_pose = POSE_.compose_pair(c2w_pose, noise)
+        c2w_refined_pose = POSE_.compose_pair(
+            c2w_perturbed_pose,
+            LIE_.se3_to_SE3(refine))
+        return c2w_refined_pose
+        
+
     def train_step(self) -> Dict[str, float]:
         """
         Perform one training step.
@@ -77,10 +128,10 @@ class BATrainer(NeRFTrainer):
         """
         # Set models to training mode
         self.radiance_field.train()
-        for p in self.proposal_networks:
-            p.train()
         self.estimator.train()
-
+        def occ_eval_fn(x):
+            density = self.radiance_field.query_density(x)
+            return density * self.render_step_size
         progress = self.step / self.config.training.max_steps
         alpha = min(progress / (self.end - self.start), 1.0)
         target_level = self.init_level * (1.0 - alpha)
@@ -107,48 +158,36 @@ class BATrainer(NeRFTrainer):
         x = data["x"]
         y = data["y"]
 
-        # Add noise to camera pose
-        c2w_pose = POSE_.from_matrix(c2w)  # [:,3,4]
-        se3_noise_pose = self.se3_noise_pose[image_id]  # [:,3,4]
-        c2w_perturbed_pose = POSE_.compose_pair(c2w_pose, se3_noise_pose)
-        # MulPose(se3_noise_pose) @ MulPose(c2w_pose)  # [:,3,4]
-        c2w_refined_pose = POSE_.compose_pair(
-            c2w_perturbed_pose,
-            LIE_.se3_to_SE3(self.se3_refine)[image_id])
-        # MulPose(LIE_.se3_to_SE3(self.se3_refine)[image_id]) @ MulPose(c2w_perturbed_pose)
-        self.se3_refine.retain_grad()
-        bottom_row = POSE_.to_matrix(c2w_refined_pose)  # [:,4,4]]
-        matrix_4x4 = torch.cat([c2w_refined_pose, bottom_row], dim=-2)
+
+        c2w_refined_pose = self.get_pose(c2w, self.se3_noise_pose[image_id], self.se3_refine[image_id])
+        matrix_4x4 = POSE_.to_matrix(c2w_refined_pose)  # [:,4,4]]
 
         # Generate rays
         rays = generate_camera_rays_with_perturbation(
             x, y, matrix_4x4, self.train_dataset, target_level
         )
-        # Determine if proposal networks need gradients
-        proposal_requires_grad = self.proposal_requires_grad_fn(self.step)
 
-        # Render
-        rgb, acc, depth, extras = render_image_with_propnet(
+        # update occupancy grid
+        self.estimator.update_every_n_steps(
+            step=self.step,
+            occ_eval_fn=occ_eval_fn,
+            occ_thre=1e-2,
+        )
+
+        # render
+        # NOTE: hard-coded cone alpha
+        rgb, acc, depth, n_rendering_samples = render_image_with_occgrid(
             self.radiance_field,
-            self.proposal_networks,
             self.estimator,
             rays,
             # rendering options
-            num_samples=self.config.model.num_samples,
-            num_samples_per_prop=self.config.model.num_samples_per_prop,
             near_plane=self.config.scene_config.near_plane,
-            far_plane=self.config.scene_config.far_plane,
-            sampling_type=self.config.model.sampling_type,
-            opaque_bkgd=self.config.model.opaque_bkgd,
+            render_step_size=self.render_step_size,
             render_bkgd=render_bkgd,
-            # train options
-            proposal_requires_grad=proposal_requires_grad,
+            cone_angle=0.004,
+            alpha_thre=0.01,
         )
 
-        # Update estimator
-        self.estimator.update_every_n_steps(
-            extras["trans"], proposal_requires_grad, loss_scaler=1024
-        )
         # Compute loss
         if alpha < 1.0:
             loss = self.mle_loss(rgb, pixels)

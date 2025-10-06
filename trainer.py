@@ -98,12 +98,12 @@ class NeRFTrainer:
     def _setup_optimizers(self):
         """Initialize optimizers and schedulers."""
         # Proposal network optimizer
-        self.prop_optimizer = torch.optim.Adam(
-            itertools.chain(*[p.parameters() for p in self.proposal_networks]),
-            lr=self.config.training.learning_rate,
-            eps=self.config.training.eps,
-            weight_decay=self.config.training.weight_decay,
-        )
+        # self.prop_optimizer = torch.optim.Adam(
+        #     itertools.chain(*[p.parameters() for p in self.proposal_networks]),
+        #     lr=self.config.training.learning_rate,
+        #     eps=self.config.training.eps,
+        #     weight_decay=self.config.training.weight_decay,
+        # )
 
         # Radiance field optimizer
         self.optimizer = torch.optim.Adam(
@@ -120,16 +120,16 @@ class NeRFTrainer:
             self.config.training.max_steps * 9 // 10,
         ]
 
-        self.prop_scheduler = torch.optim.lr_scheduler.ChainedScheduler(
-            [
-                torch.optim.lr_scheduler.LinearLR(
-                    self.prop_optimizer, start_factor=0.01, total_iters=100
-                ),
-                torch.optim.lr_scheduler.MultiStepLR(
-                    self.prop_optimizer, milestones=milestones, gamma=0.33
-                ),
-            ]
-        )
+        # self.prop_scheduler = torch.optim.lr_scheduler.ChainedScheduler(
+        #     [
+        #         torch.optim.lr_scheduler.LinearLR(
+        #             self.prop_optimizer, start_factor=0.01, total_iters=100
+        #         ),
+        #         torch.optim.lr_scheduler.MultiStepLR(
+        #             self.prop_optimizer, milestones=milestones, gamma=0.33
+        #         ),
+        #     ]
+        # )
 
         self.scheduler = torch.optim.lr_scheduler.ChainedScheduler(
             [
