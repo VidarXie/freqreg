@@ -12,12 +12,13 @@ from config import NeRFConfig
 from utils.render_utils import (
     render_image_with_propnet,
     generate_camera_rays,
+    generate_camera_rays_with_perturbation
 )
 
 from trainer import NeRFTrainer
 
 from utils.lie_utils import LIE_
-from utils.pose_utils import POSE_
+from utils.pose_utils import POSE_, MulPose
 
 
 class BATrainer(NeRFTrainer):
@@ -26,8 +27,11 @@ class BATrainer(NeRFTrainer):
     """
 
     def __init__(self, config: NeRFConfig):
-        super().__init__(config)
         self.se3_noise_factor = 0.10
+        super().__init__(config)
+        self.start = 0.0
+        self.end = 0.75
+        self.init_level = 4.0
 
     def _setup_models(self):
         super()._setup_models()
@@ -40,8 +44,9 @@ class BATrainer(NeRFTrainer):
         self.se3_noise_pose = LIE_.se3_to_SE3(se3_noise)
 
         # pose refinement embeddings
-        self.se3_refine = torch.nn.Embedding(len(self.train_data), 6).to(self.device)
-        torch.nn.init.zeros_(self.se3_refine.weight)
+        self.se3_refine = torch.nn.Parameter(torch.zeros(len(self.train_dataset), 6, dtype=torch.float).cuda().requires_grad_(True))
+        # torch.nn.Embedding(len(self.train_dataset), 6).to(self.device)
+        # torch.nn.init.zeros_(self.se3_refine.weight)
 
     def _setup_optimizers(self):
         """Initialize optimizers and schedulers."""
@@ -76,6 +81,10 @@ class BATrainer(NeRFTrainer):
             p.train()
         self.estimator.train()
 
+        progress = self.step / self.config.training.max_steps
+        alpha = min(progress / (self.end - self.start), 1.0)
+        target_level = self.init_level * (1.0 - alpha)
+
         # Sample training data
         i = torch.randint(0, len(self.train_dataset), (1,)).item()
         data = self.train_dataset[i]
@@ -101,16 +110,20 @@ class BATrainer(NeRFTrainer):
         # Add noise to camera pose
         c2w_pose = POSE_.from_matrix(c2w)  # [:,3,4]
         se3_noise_pose = self.se3_noise_pose[image_id]  # [:,3,4]
-        c2w_perturbed_pose = POSE_.compose(se3_noise_pose, c2w_pose)  # [:,3,4]
-        c2w_refined_pose = POSE_.compose(
-            LIE_.se3_to_SE3(self.se3_refine.weight), c2w_perturbed_pose
-        )  # [:,3,4]
-
-        c2w = POSE_.to_matrix(c2w_refined_pose)  # [:,4,4]
+        c2w_perturbed_pose = POSE_.compose_pair(c2w_pose, se3_noise_pose)
+        # MulPose(se3_noise_pose) @ MulPose(c2w_pose)  # [:,3,4]
+        c2w_refined_pose = POSE_.compose_pair(
+            c2w_perturbed_pose,
+            LIE_.se3_to_SE3(self.se3_refine)[image_id])
+        # MulPose(LIE_.se3_to_SE3(self.se3_refine)[image_id]) @ MulPose(c2w_perturbed_pose)
+        self.se3_refine.retain_grad()
+        bottom_row = POSE_.to_matrix(c2w_refined_pose)  # [:,4,4]]
+        matrix_4x4 = torch.cat([c2w_refined_pose, bottom_row], dim=-2)
 
         # Generate rays
-        rays = generate_camera_rays(x, y, c2w, self.train_dataset)
-
+        rays = generate_camera_rays_with_perturbation(
+            x, y, matrix_4x4, self.train_dataset, target_level
+        )
         # Determine if proposal networks need gradients
         proposal_requires_grad = self.proposal_requires_grad_fn(self.step)
 
@@ -136,14 +149,16 @@ class BATrainer(NeRFTrainer):
         self.estimator.update_every_n_steps(
             extras["trans"], proposal_requires_grad, loss_scaler=1024
         )
-
         # Compute loss
-        loss = F.smooth_l1_loss(rgb, pixels)
+        if alpha < 1.0:
+            loss = self.mle_loss(rgb, pixels)
+        else:
+            loss = F.smooth_l1_loss(rgb, pixels)
 
         # Backward pass
-        self.optimizer.zero_grad()
-        self.pose_optimizer.zero_grad()
-
+        torch.autograd.set_detect_anomaly(True)
+        self.optimizer.zero_grad(set_to_none=True)
+        self.pose_optimizer.zero_grad(set_to_none=True)
         self.grad_scaler.scale(loss).backward()
 
         self.optimizer.step()
@@ -151,12 +166,12 @@ class BATrainer(NeRFTrainer):
 
         self.pose_optimizer.step()
         self.pose_scheduler.step()
-
+        with torch.no_grad():
         # Compute metrics
-        mse_loss = F.mse_loss(rgb, pixels)
-        psnr = -10.0 * torch.log(mse_loss) / torch.log(torch.tensor(10.0))
+            mse_loss = F.mse_loss(rgb, pixels)
+            psnr = -10.0 * torch.log(mse_loss) / torch.log(torch.tensor(10.0))
 
-        self.step += 1
+            self.step += 1
 
         return {
             "loss": loss.item(),
@@ -166,6 +181,17 @@ class BATrainer(NeRFTrainer):
             "max_depth": depth.max().item(),
         }
 
+    def mle_loss(self, rgb, pixels):
+        eps = 1e-8
+        rgb_render = torch.clamp(rgb, min=eps)
+        rgb_gt = torch.clamp(pixels, min=eps)
+
+        loss = torch.mean(-torch.log(rgb_render) * rgb_gt) / torch.mean(rgb_gt)
+        loss += torch.log(torch.mean(rgb_render))
+        loss += (torch.mean(rgb_render) - torch.mean(rgb_gt)) ** 2
+
+        return loss
+    
     def print_training_stats(self, metrics: Dict[str, float]):
         """Print training statistics."""
         elapsed_time = time.time() - self.start_time
@@ -175,3 +201,5 @@ class BATrainer(NeRFTrainer):
             f"num_rays={metrics['num_rays']:d} | "
             f"max_depth={metrics['max_depth']:.3f}"
         )
+
+        

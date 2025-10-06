@@ -55,6 +55,7 @@ class Pose:
         pose_new = self(R=R_new, t=t_new)
         return pose_new
 
+    @torch.no_grad()
     def to_matrix(self, pose):
         if not isinstance(pose, torch.Tensor):
             pose = torch.tensor(pose)
@@ -69,8 +70,8 @@ class Pose:
         bottom_row = bottom_row.expand(*batch_shape, 1, 4)
 
         # Concatenate to get 4x4 matrix
-        matrix_4x4 = torch.cat([pose, bottom_row], dim=-2)
-        return matrix_4x4
+        
+        return bottom_row
 
     def from_matrix(self, matrix):
         if not isinstance(matrix, torch.Tensor):
@@ -86,3 +87,10 @@ class Pose:
 
 
 POSE_ = Pose()
+
+class MulPose:
+    def __init__(self, pose):
+        self.pose = pose
+
+    def __matmul__(self, other):
+        return POSE_.compose_pair(other.pose, self.pose)

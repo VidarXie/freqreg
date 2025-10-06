@@ -125,8 +125,8 @@ def render_image_with_occgrid(
             return rgbs, sigmas.squeeze(-1)
 
         ray_indices, t_starts, t_ends = estimator.sampling(
-            rays_o,
-            rays_d,
+            rays_o.detach(),
+            rays_d.detach(),
             sigma_fn=sigma_fn,
             near_plane=near_plane,
             far_plane=far_plane,
@@ -220,7 +220,7 @@ def render_image_with_propnet(
             far_plane=far_plane,
             sampling_type=sampling_type,
             stratified=radiance_field.training,
-            requires_grad=proposal_requires_grad,
+            requires_grad=False,
         )
         rgb, opacity, depth, extras = rendering(
             t_starts,

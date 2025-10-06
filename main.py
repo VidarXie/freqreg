@@ -109,27 +109,16 @@ def main():
         print(f"Learning rate: {config.training.learning_rate}")
         print("=" * 50)
 
-    try:
-        # Initialize pipeline
-        pipeline = NeRFPipeline(config=config)
+    # Initialize pipeline
+    pipeline = NeRFPipeline(config=config)
 
-        _ = pipeline.train(verbose=verbose)
+    _ = pipeline.train(verbose=verbose)
 
-        if verbose:
-            print("\n" + "=" * 50)
-            print("Training completed successfully!")
-            print("=" * 50)
+    if verbose:
+        print("\n" + "=" * 50)
+        print("Training completed successfully!")
+        print("=" * 50)
 
-    except KeyboardInterrupt:
-        print("\nTraining interrupted by user")
-        sys.exit(1)
-    except Exception as e:
-        print(f"\nError during training: {e}")
-        if verbose:
-            import traceback
-
-            traceback.print_exc()
-        sys.exit(1)
 
 
 if __name__ == "__main__":

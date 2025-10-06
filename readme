@@ -1,0 +1,10 @@
+To run: 
+
+python main.py --scene lego --data_root data/nerf_synthetic
+
+or
+
+python main.py --scene garden --data_root data/360_v2
+
+modify pipeline.py line 28-29 to see the performance of MLEtrainer
+the same for BAtrainer

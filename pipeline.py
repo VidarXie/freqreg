@@ -7,6 +7,7 @@ from typing import Dict, Any
 from config import NeRFConfig
 from trainer import NeRFTrainer
 from MLEtrainer import MLETrainer
+from BAtrainer import BATrainer
 from evaluator import NeRFEvaluator
 
 
@@ -25,8 +26,8 @@ class NeRFPipeline:
         self.config = config
 
         # Initialize trainer and evaluator
-        # self.trainer = NeRFTrainer(config)
-        self.trainer = MLETrainer(config)
+        self.trainer = BATrainer(config)
+        # self.trainer = MLETrainer(config)
         self.evaluator = NeRFEvaluator(self.trainer, save_images=True)
 
         # Training history
