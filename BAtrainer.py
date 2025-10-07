@@ -13,7 +13,7 @@ from config import NeRFConfig
 from utils.render_utils import (
     render_image_with_occgrid,
     generate_camera_rays_with_perturbation,
-    generate_camera_rays
+    generate_camera_rays,
 )
 
 from trainer import NeRFTrainer, NGPRadianceField
@@ -35,6 +35,7 @@ class BATrainer(NeRFTrainer):
         self.start = 0.0
         self.end = 0.75
         self.init_level = 4.0
+        self.target_sample_batch_size = 1 << 18
 
     def _setup_models(self):
         """Initialize radiance field and proposal networks."""
@@ -60,7 +61,11 @@ class BATrainer(NeRFTrainer):
         self.se3_noise_pose = LIE_.se3_to_SE3(se3_noise)
 
         # pose refinement embeddings
-        self.se3_refine = torch.nn.Parameter(torch.zeros(len(self.train_dataset), 6, dtype=torch.float).cuda().requires_grad_(True))
+        self.se3_refine = torch.nn.Parameter(
+            torch.zeros(len(self.train_dataset), 6, dtype=torch.float)
+            .cuda()
+            .requires_grad_(True)
+        )
         # torch.nn.Embedding(len(self.train_dataset), 6).to(self.device)
         # torch.nn.init.zeros_(self.se3_refine.weight)
 
@@ -117,10 +122,10 @@ class BATrainer(NeRFTrainer):
         c2w_pose = POSE_.from_matrix(c2w)  # [:,3,4]
         c2w_perturbed_pose = POSE_.compose_pair(c2w_pose, noise)
         c2w_refined_pose = POSE_.compose_pair(
-            c2w_perturbed_pose,
-            LIE_.se3_to_SE3(refine))
+            c2w_perturbed_pose, LIE_.se3_to_SE3(refine)
+        )
         return c2w_refined_pose
-        
+
     def get_pose_by_camera(self):
         c2w = self.train_dataset.camtoworlds
         return self.get_pose(c2w, self.se3_noise_pose, self.se3_refine)
@@ -128,13 +133,17 @@ class BATrainer(NeRFTrainer):
     @torch.no_grad()
     def get_pose_error(self):
         est_poses = self.get_pose_by_camera()
-        te, re, R0, s, t = sim3_align_errors(self.train_dataset.camtoworlds[..., :3, :4], est_poses)
+        te, re, R0, s, t = sim3_align_errors(
+            self.train_dataset.camtoworlds[..., :3, :4], est_poses
+        )
         return te, re
-    
+
     @torch.no_grad()
     def get_pose_align(self):
         est_poses = self.get_pose_by_camera()
-        te, re, R0, s, t = sim3_align_errors(self.train_dataset.camtoworlds[..., :3, :4], est_poses)
+        te, re, R0, s, t = sim3_align_errors(
+            self.train_dataset.camtoworlds[..., :3, :4], est_poses
+        )
         return R0, s, t
 
     def train_step(self) -> Dict[str, float]:
@@ -147,9 +156,11 @@ class BATrainer(NeRFTrainer):
         # Set models to training mode
         self.radiance_field.train()
         self.estimator.train()
+
         def occ_eval_fn(x):
             density = self.radiance_field.query_density(x)
             return density * self.render_step_size
+
         progress = self.step / self.config.training.max_steps
         alpha = min(progress / (self.end - self.start), 1.0)
         target_level = self.init_level * (1.0 - alpha)
@@ -175,7 +186,6 @@ class BATrainer(NeRFTrainer):
         image_id = data["image_id"]
         x = data["x"]
         y = data["y"]
-
 
         c2w_refined_pose = self.get_pose_by_camera()[image_id]
         matrix_4x4 = POSE_.to_matrix(c2w_refined_pose)  # [:,4,4]]
@@ -223,8 +233,18 @@ class BATrainer(NeRFTrainer):
 
         self.pose_optimizer.step()
         self.pose_scheduler.step()
+
+        if self.target_sample_batch_size > 0:
+            # dynamic batch size for rays to keep sample batch size constant.
+            num_rays = len(pixels)
+            num_rays = int(
+                num_rays
+                * max((self.target_sample_batch_size / float(n_rendering_samples)), 1.0)
+            )
+            self.train_dataset.update_num_rays(num_rays)
+
         with torch.no_grad():
-        # Compute metrics
+            # Compute metrics
             mse_loss = F.mse_loss(rgb, pixels)
             psnr = -10.0 * torch.log(mse_loss) / torch.log(torch.tensor(10.0))
 
@@ -248,7 +268,7 @@ class BATrainer(NeRFTrainer):
         loss += (torch.mean(rgb_render) - torch.mean(rgb_gt)) ** 2
 
         return loss
-    
+
     def print_training_stats(self, metrics: Dict[str, float]):
         """Print training statistics."""
         elapsed_time = time.time() - self.start_time
@@ -261,7 +281,7 @@ class BATrainer(NeRFTrainer):
             f"rotation_error={metrics['rotation_error']:.3f}"
         )
 
-        
+
 class BAEvaluator(NeRFEvaluator):
     def evaluate(self, verbose=True):
         self.trainer.radiance_field.eval()
@@ -294,7 +314,7 @@ class BAEvaluator(NeRFEvaluator):
                 pixels = data["pixels"]
 
                 c2w = data["c2w"]
-                c2w_R = torch.einsum('ij,njk->nik', align_R0.t(), c2w[..., :3, :3])
+                c2w_R = torch.einsum("ij,njk->nik", align_R0.t(), c2w[..., :3, :3])
                 c2w_t = (c2w[..., :3, 3] - align_t) / align_s @ align_R0
                 c2w_aligned = torch.cat([c2w_R, c2w_t[..., None]], dim=-1)
                 image_id = data["image_id"]
@@ -302,7 +322,9 @@ class BAEvaluator(NeRFEvaluator):
                 y = data["y"]
 
                 # Generate rays
-                rays = generate_camera_rays(x, y, c2w_aligned, self.trainer.test_dataset)
+                rays = generate_camera_rays(
+                    x, y, c2w_aligned, self.trainer.test_dataset
+                )
 
                 # Render image
                 rgb, acc, depth, n_rendering_samples = render_image_with_occgrid(
