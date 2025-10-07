@@ -3,12 +3,14 @@ NeRF training pipeline that orchestrates the entire training and evaluation proc
 """
 
 from typing import Dict, Any
+from pathlib import Path
 
 from config import NeRFConfig
 from trainers.trainer import NeRFTrainer
 from trainers.MLEtrainer import MLETrainer
 from trainers.BAtrainer import BATrainer
 from trainers.BAevaluator import BAEvaluator
+from utils.rerun import RerunLogger
 
 
 class NeRFPipeline:
@@ -33,6 +35,8 @@ class NeRFPipeline:
         # Training history
         self.training_history = []
         self.evaluation_history = []
+
+        self.rerun_logger = RerunLogger(Path("world"))
 
     def train(self, verbose: bool = True) -> Dict[str, Any]:
         """
@@ -62,6 +66,10 @@ class NeRFPipeline:
                     }
                 )
                 self.trainer.print_training_stats(metrics)
+
+                self.rerun_logger.log_poses_at_frame(
+                    gt_poses, pred_poses, self.trainer.step
+                )
 
             # Store metrics
             metrics["step"] = self.trainer.step
