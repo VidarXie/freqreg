@@ -32,7 +32,7 @@ trunc_exp = _TruncExp.apply
 
 
 def contract_to_unisphere(
-    x: torch.Tensor,
+    x_: torch.Tensor,
     aabb: torch.Tensor,
     ord: Union[str, int] = 2,
     #  ord: Union[float, int] = float("inf"),
@@ -40,8 +40,7 @@ def contract_to_unisphere(
     derivative: bool = False,
 ):
     aabb_min, aabb_max = torch.split(aabb, 3, dim=-1)
-    x = (x - aabb_min) / (aabb_max - aabb_min)
-    x = x * 2 - 1  # aabb is at [-1, 1]
+    x = (x_ - aabb_min) / (aabb_max - aabb_min) * 2 - 1
     mag = torch.linalg.norm(x, ord=ord, dim=-1, keepdim=True)
     mask = mag.squeeze(-1) > 1
 
@@ -51,9 +50,9 @@ def contract_to_unisphere(
         dev = torch.clamp(dev, min=eps)
         return dev
     else:
-        x[mask] = (2 - 1 / mag[mask]) * (x[mask] / mag[mask])
-        x = x / 4 + 0.5  # [-inf, inf] is at [0, 1]
-        return x
+        rhs = (2 - 1.0 / mag) * (x / mag)
+        y = torch.where(mask[:, None], rhs, x)
+        return y / 4 + 0.5
 
 
 class NGPRadianceField(torch.nn.Module):
@@ -148,12 +147,12 @@ class NGPRadianceField(torch.nn.Module):
                 },
             )
 
-    def query_density(self, x, return_feat: bool = False):
+    def query_density(self, x_, return_feat: bool = False):
         if self.unbounded:
-            x = contract_to_unisphere(x, self.aabb)
+            x = contract_to_unisphere(x_, self.aabb)
         else:
             aabb_min, aabb_max = torch.split(self.aabb, self.num_dim, dim=-1)
-            x = (x - aabb_min) / (aabb_max - aabb_min)
+            x = (x_ - aabb_min) / (aabb_max - aabb_min)
         selector = ((x > 0.0) & (x < 1.0)).all(dim=-1)
         x = (
             self.mlp_base(x.view(-1, self.num_dim))
