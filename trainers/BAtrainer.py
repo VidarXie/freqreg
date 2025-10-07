@@ -138,7 +138,7 @@ class BATrainer(NeRFTrainer):
     @torch.no_grad()
     def get_pose_align(self):
         est_poses = self.get_pose_by_camera()
-        te, re, R0, s, t = sim3_align_errors(
+        out, te, re, R0, s, t = sim3_align_errors(
             self.train_dataset.camtoworlds[..., :3, :4], est_poses
         )
         return R0, s, t
