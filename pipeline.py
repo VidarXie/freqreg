@@ -10,7 +10,8 @@ from trainers.trainer import NeRFTrainer
 from trainers.MLEtrainer import MLETrainer
 from trainers.BAtrainer import BATrainer
 from trainers.BAevaluator import BAEvaluator
-from utils.rerun import RerunLogger
+from utils.rerun import RerunLogger, create_blueprint
+import rerun as rr
 
 
 class NeRFPipeline:
@@ -37,6 +38,9 @@ class NeRFPipeline:
         self.evaluation_history = []
 
         self.rerun_logger = RerunLogger(Path("world"))
+        blueprint = create_blueprint(Path("world"))
+        rr.init("pose_refinement", spawn=True)
+        rr.send_blueprint(blueprint)
 
     def train(self, verbose: bool = True) -> Dict[str, Any]:
         """
@@ -58,7 +62,7 @@ class NeRFPipeline:
 
             # Log training metrics
             if self.trainer.should_print() and verbose:
-                te, re = self.trainer.get_pose_error()
+                gt_poses, est, te, re = self.trainer.get_pose_error()
                 metrics.update(
                     {
                         "translation_error": te.mean().item(),
@@ -68,7 +72,7 @@ class NeRFPipeline:
                 self.trainer.print_training_stats(metrics)
 
                 self.rerun_logger.log_poses_at_frame(
-                    gt_poses, pred_poses, self.trainer.step
+                    gt_poses, est, self.trainer.step
                 )
 
             # Store metrics

@@ -27,7 +27,7 @@ class BATrainer(NeRFTrainer):
     """
 
     def __init__(self, config: NeRFConfig):
-        self.se3_noise_factor = 0.05
+        self.se3_noise_factor = 0.1
         super().__init__(config)
         self.start = 0.0
         self.end = 0.75
@@ -130,10 +130,10 @@ class BATrainer(NeRFTrainer):
     @torch.no_grad()
     def get_pose_error(self):
         est_poses = self.get_pose_by_camera()
-        te, re, R0, s, t = sim3_align_errors(
+        out, te, re, R0, s, t = sim3_align_errors(
             self.train_dataset.camtoworlds[..., :3, :4], est_poses
         )
-        return te, re
+        return self.train_dataset.camtoworlds[..., :3, :4], out, te, re
 
     @torch.no_grad()
     def get_pose_align(self):

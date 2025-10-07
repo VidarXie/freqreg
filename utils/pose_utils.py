@@ -106,4 +106,4 @@ def sim3_align_errors(gt, est):
     Rerr = torch.einsum('nij,njk->nik', gt[:, :, :3].transpose(1,2), Ra)
     tr = Rerr.diagonal(dim1=1, dim2=2).sum(1)
     re = torch.arccos(((tr - 1.0) * 0.5).clamp(-1.0, 1.0)) * (180.0 / torch.pi)
-    return te, re, R0, s, t
+    return out, te, re, R0, s, t

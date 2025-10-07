@@ -34,10 +34,8 @@ class RerunLogger:
 
         # Extract camera centers using the same method as get_camera_mesh
         # Camera center is at (0, 0, 0) in camera coordinates
-        center = torch.zeros(1, 1, 3, device=gt_poses.device)
-        gt_centers = camera.cam2world(center, gt_poses)[:, 0]  # Shape: (N, 3)
-        gt_centers_np = gt_centers.detach().cpu().numpy()
-        gt_rotations_np = gt_poses[..., :3, :3].transpose(-2, -1).detach().cpu().numpy()
+        gt_centers_np = gt_poses[..., 3].detach().cpu().numpy() 
+        gt_rotations_np = gt_poses[..., :3, :3].detach().cpu().numpy()
 
         # Log all ground truth camera centers
         rr.log(
@@ -70,11 +68,8 @@ class RerunLogger:
         pred_log_path = self.parent_log_path / "pred_poses"
 
         # Extract camera centers for predicted poses
-        pred_centers = camera.cam2world(center, pred_poses)[:, 0]  # Shape: (N, 3)
-        pred_centers_np = pred_centers.detach().cpu().numpy()
-        pred_rotations_np = (
-            pred_poses[..., :3, :3].transpose(-2, -1).detach().cpu().numpy()
-        )
+        pred_centers_np = pred_poses[..., 3].detach().cpu().numpy()  # Shape: (N, 3)
+        pred_rotations_np = pred_poses[..., :3, :3].detach().cpu().numpy()
 
         # Log all predicted camera centers
         rr.log(
@@ -126,14 +121,14 @@ class RerunLogger:
         z = w * z_ratio
 
         frustum_line = [
-            [[0, 0, 0], [w, h, z]],
-            [[0, 0, 0], [w, -h, z]],
-            [[0, 0, 0], [-w, -h, z]],
-            [[0, 0, 0], [-w, h, z]],
-            [[w, h, z], [w, -h, z]],
-            [[-w, h, z], [-w, -h, z]],
-            [[-w, h, z], [w, h, z]],
-            [[-w, -h, z], [w, -h, z]],
+            [[0, 0, 0], [w, h, -z]],
+            [[0, 0, 0], [w, -h, -z]],
+            [[0, 0, 0], [-w, -h, -z]],
+            [[0, 0, 0], [-w, h, -z]],
+            [[w, h, -z], [w, -h, -z]],
+            [[-w, h, -z], [-w, -h, -z]],
+            [[-w, h, -z], [w, h, -z]],
+            [[-w, -h, -z], [w, -h, -z]],
         ]
 
         line_stips = []
