@@ -27,7 +27,7 @@ class BATrainer(NeRFTrainer):
     """
 
     def __init__(self, config: NeRFConfig):
-        self.se3_noise_factor = 0.1
+        self.se3_noise_factor = 0.03
         super().__init__(config)
         self.start = 0.0
         self.end = 0.75

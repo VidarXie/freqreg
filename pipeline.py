@@ -5,6 +5,8 @@ NeRF training pipeline that orchestrates the entire training and evaluation proc
 from typing import Dict, Any
 from pathlib import Path
 
+import torch
+
 from config import NeRFConfig
 from trainers.trainer import NeRFTrainer
 from trainers.MLEtrainer import MLETrainer
@@ -61,33 +63,41 @@ class NeRFPipeline:
             metrics = self.trainer.train_step()
 
             # Log training metrics
-            if self.trainer.should_print() and verbose:
-                gt_poses, est, te, re = self.trainer.get_pose_error()
-                metrics.update(
-                    {
-                        "translation_error": te.mean().item(),
-                        "rotation_error": re.mean().item(),
-                    }
-                )
-                self.trainer.print_training_stats(metrics)
+            with torch.no_grad():
+                if self.trainer.should_print() and verbose:
+                    gt_poses, est, te, re = self.trainer.get_pose_error()
+                    metrics.update(
+                        {
+                            "translation_error": te.mean().item(),
+                            "rotation_error": re.mean().item(),
+                        }
+                    )
+                    self.trainer.print_training_stats(metrics)
+                    factor = 1
+                    if self.trainer.train_dataset.OPENGL_CAMERA:
+                        gt_poses = gt_poses.clone()
+                        est = est.clone()
+                        gt_poses[..., :3, 1:3] *= -1.0
+                        est[..., :3, 1:3] *= -1.0
+                        factor = 10
 
-                self.rerun_logger.log_poses_at_frame(
-                    gt_poses, est, self.trainer.step
-                )
+                    self.rerun_logger.log_poses_at_frame(
+                        gt_poses, est, self.trainer.step, factor
+                    )
 
-            # Store metrics
-            metrics["step"] = self.trainer.step
-            self.training_history.append(metrics)
+                # Store metrics
+                metrics["step"] = self.trainer.step
+                self.training_history.append(metrics)
 
-            # Evaluation
-            if self.trainer.should_evaluate():
-                print("Running evaluation...")
-                eval_results = self.evaluator.evaluate(verbose=verbose)
-                eval_results["step"] = self.trainer.step
-                self.evaluation_history.append(eval_results)
+                # Evaluation
+                if self.trainer.should_evaluate():
+                    print("Running evaluation...")
+                    eval_results = self.evaluator.evaluate(verbose=verbose)
+                    eval_results["step"] = self.trainer.step
+                    self.evaluation_history.append(eval_results)
 
-                if verbose:
-                    self.evaluator.print_evaluation_results(eval_results)
+                    if verbose:
+                        self.evaluator.print_evaluation_results(eval_results)
 
         # Final evaluation
         print("Training completed. Running final evaluation...")

@@ -21,7 +21,7 @@ class RerunLogger:
         self.parent_log_path = parent_log_path
         rr.log(str(self.parent_log_path), rr.ViewCoordinates.RDF, static=True)
 
-    def log_poses_at_frame(self, gt_poses, pred_poses, frame_id):
+    def log_poses_at_frame(self, gt_poses, pred_poses, frame_id, factor=1):
         """
         Log both ground truth and predicted poses at the same frame.
         This ensures all camera data appears simultaneously.
@@ -43,13 +43,13 @@ class RerunLogger:
             rr.Points3D(
                 positions=gt_centers_np,
                 colors=[0, 0, 255],
-                radii=0.05,  # Make points more visible
+                radii=0.005 * factor,  # Make points more visible
             ),
         )
 
         gt_cam_log_path = self.parent_log_path / "gt_poses" / "cameras"
 
-        line_stips = self._draw_camera_frustum(0.2, ratio=1.0)
+        line_stips = self._draw_camera_frustum(0.02 * factor, ratio=1.0)
 
         for i, (gt_rot, gt_cen) in enumerate(zip(gt_rotations_np, gt_centers_np)):
             rr.log(
@@ -61,7 +61,7 @@ class RerunLogger:
             )
             rr.log(
                 f"{gt_cam_log_path}/{i}/frustum",
-                rr.LineStrips3D(strips=line_stips, colors=[0, 0, 255], radii=0.01),
+                rr.LineStrips3D(strips=line_stips, colors=[0, 0, 255], radii=0.001 * factor),
             )
 
         # Log predicted poses
@@ -77,7 +77,7 @@ class RerunLogger:
             rr.Points3D(
                 positions=pred_centers_np,
                 colors=[255, 0, 0],
-                radii=0.05,  # Make points more visible
+                radii=0.005 * factor,  # Make points more visible
             ),
         )
 
@@ -95,7 +95,7 @@ class RerunLogger:
             )
             rr.log(
                 f"{pred_cam_log_path}/{i}/frustum",
-                rr.LineStrips3D(strips=line_stips, colors=[255, 0, 0], radii=0.01),
+                rr.LineStrips3D(strips=line_stips, colors=[255, 0, 0], radii=0.001 * factor),
             )
 
         # Log line segments connecting corresponding GT and predicted camera centers
@@ -121,14 +121,14 @@ class RerunLogger:
         z = w * z_ratio
 
         frustum_line = [
-            [[0, 0, 0], [w, h, -z]],
-            [[0, 0, 0], [w, -h, -z]],
-            [[0, 0, 0], [-w, -h, -z]],
-            [[0, 0, 0], [-w, h, -z]],
-            [[w, h, -z], [w, -h, -z]],
-            [[-w, h, -z], [-w, -h, -z]],
-            [[-w, h, -z], [w, h, -z]],
-            [[-w, -h, -z], [w, -h, -z]],
+            [[0, 0, 0], [w, h, z]],
+            [[0, 0, 0], [w, -h, z]],
+            [[0, 0, 0], [-w, -h, z]],
+            [[0, 0, 0], [-w, h, z]],
+            [[w, h, z], [w, -h, z]],
+            [[-w, h, z], [-w, -h, z]],
+            [[-w, h, z], [w, h, z]],
+            [[-w, -h, z], [w, -h, z]],
         ]
 
         line_stips = []
