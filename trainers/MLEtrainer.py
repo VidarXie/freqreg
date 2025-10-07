@@ -13,7 +13,7 @@ from utils.render_utils import (
     generate_camera_rays_with_perturbation,
 )
 
-from trainer import NeRFTrainer
+from trainers.trainer import NeRFTrainer
 
 
 class MLETrainer(NeRFTrainer):

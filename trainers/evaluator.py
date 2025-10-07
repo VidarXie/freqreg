@@ -10,8 +10,12 @@ from typing import Dict
 import torch
 import torch.nn.functional as F
 import tqdm
-from trainer import NeRFTrainer
-from utils.render_utils import render_image_with_propnet, generate_camera_rays, render_image_with_occgrid
+from trainers.trainer import NeRFTrainer
+from utils.render_utils import (
+    render_image_with_propnet,
+    generate_camera_rays,
+    render_image_with_occgrid,
+)
 
 
 class NeRFEvaluator:

@@ -5,9 +5,10 @@ NeRF training pipeline that orchestrates the entire training and evaluation proc
 from typing import Dict, Any
 
 from config import NeRFConfig
-from trainer import NeRFTrainer
-from MLEtrainer import MLETrainer
-from BAtrainer import BATrainer, BAEvaluator
+from trainers.trainer import NeRFTrainer
+from trainers.MLEtrainer import MLETrainer
+from trainers.BAtrainer import BATrainer
+from trainers.BAevaluator import BAEvaluator
 
 
 class NeRFPipeline:
@@ -54,10 +55,12 @@ class NeRFPipeline:
             # Log training metrics
             if self.trainer.should_print() and verbose:
                 te, re = self.trainer.get_pose_error()
-                metrics.update({
-                    "translation_error": te.mean().item(),
-                    "rotation_error": re.mean().item(),
-                })
+                metrics.update(
+                    {
+                        "translation_error": te.mean().item(),
+                        "rotation_error": re.mean().item(),
+                    }
+                )
                 self.trainer.print_training_stats(metrics)
 
             # Store metrics
