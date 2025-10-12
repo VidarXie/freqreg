@@ -164,7 +164,10 @@ class NeRFEvaluator:
 
         # Save combined image
         imageio.imwrite(
-            os.path.join(self.test_images_dir, f"test_combined_{image_idx:03d}.png"),
+            os.path.join(
+                self.test_images_dir,
+                f"test_combined_{image_idx:03d}_{self.trainer.step}.png",
+            ),
             combined,
         )
 

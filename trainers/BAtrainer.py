@@ -4,6 +4,9 @@ NeRF trainer class for modular training pipeline.
 
 import time
 from typing import Dict
+import rerun as rr
+from pathlib import Path
+import math
 
 import torch
 import torch.nn.functional as F
@@ -20,6 +23,8 @@ from utils.lie_utils import LIE_
 from utils.pose_utils import POSE_, sim3_align_errors
 from nerfacc.estimators.occ_grid import OccGridEstimator
 
+from utils.rerun import RerunLogger, create_blueprint
+
 
 class BATrainer(NeRFTrainer):
     """
@@ -27,12 +32,33 @@ class BATrainer(NeRFTrainer):
     """
 
     def __init__(self, config: NeRFConfig):
-        self.se3_noise_factor = 0.03
+        self.se3_noise_factor = 0.12
         super().__init__(config)
         self.start = 0.0
         self.end = 0.75
-        self.init_level = 4.0
+        self.init_level = 6.5
+        if self.train_dataset.OPENGL_CAMERA:
+            # for blender dataset
+            self.init_level = 5.0
         self.target_sample_batch_size = 1 << 18
+
+        self.rerun_logger = RerunLogger(Path("world"))
+        blueprint = create_blueprint(Path("world"))
+        rr.init("pose_refinement", spawn=True)
+        rr.send_blueprint(blueprint)
+
+        self.rerun_factor = 1.0
+        if self.train_dataset.OPENGL_CAMERA:
+            # for blender dataset
+            self.rerun_factor = 8.0
+
+        print("=" * 20)
+        print("Using BA trainer")
+        print("=" * 20)
+        print("Noise factor:", self.se3_noise_factor)
+        print("Initial level:", self.init_level)
+        print("Rerun factor:", self.rerun_factor)
+        print("=" * 20)
 
     def _setup_models(self):
         """Initialize radiance field and proposal networks."""
@@ -99,6 +125,8 @@ class BATrainer(NeRFTrainer):
         )
 
         self.pose_optimizer = torch.optim.Adam([self.se3_refine], lr=0.001)
+        if self.train_dataset.OPENGL_CAMERA:
+            self.pose_optimizer = torch.optim.Adam([self.se3_refine], lr=0.005)
 
         # Schedulers
         pose_opt_milestones = [
@@ -108,10 +136,17 @@ class BATrainer(NeRFTrainer):
             self.config.training.max_steps * 9 // 10,
         ]
 
-        self.pose_scheduler = torch.optim.lr_scheduler.MultiStepLR(
-            self.pose_optimizer,
-            milestones=pose_opt_milestones,
-            gamma=0.33,
+        self.pose_scheduler = torch.optim.lr_scheduler.ChainedScheduler(
+            [
+                torch.optim.lr_scheduler.LinearLR(
+                    self.pose_optimizer,
+                    start_factor=0.001,
+                    total_iters=0.01 * self.config.training.max_steps,
+                ),
+                torch.optim.lr_scheduler.MultiStepLR(
+                    self.pose_optimizer, milestones=pose_opt_milestones, gamma=0.33
+                ),
+            ]
         )
 
     def get_pose(self, c2w, noise, refine):
@@ -130,17 +165,60 @@ class BATrainer(NeRFTrainer):
     @torch.no_grad()
     def get_pose_error(self):
         est_poses = self.get_pose_by_camera()
-        out, te, re, R0, s, t = sim3_align_errors(
+        out_original, te_original, re_original, _, _, _ = sim3_align_errors(
             self.train_dataset.camtoworlds[..., :3, :4], est_poses
         )
-        return self.train_dataset.camtoworlds[..., :3, :4], out, te, re
+
+        # Identify outlier poses
+        q1 = torch.quantile(te_original, 0.25)
+        q3 = torch.quantile(te_original, 0.75)
+        iqr = q3 - q1
+        upper_fence = q3 + 3.0 * iqr
+        inlier_indices = (te_original < upper_fence).nonzero(as_tuple=True)[0]
+
+        outlier_pct = 100.0 * (1.0 - len(inlier_indices) / len(te_original))
+
+        out_inlier = torch.tensor(0.0)
+        te_inlier = torch.tensor(0.0)
+        re_inlier = torch.tensor(0.0)
+        if len(inlier_indices) > 0:
+            est_poses_in = est_poses[inlier_indices]
+            gt_poses_in = self.train_dataset.camtoworlds[inlier_indices, :3, :4]
+            out_inlier, te_inlier, re_inlier, _, _, _ = sim3_align_errors(
+                gt_poses_in, est_poses_in
+            )
+
+        return (
+            self.train_dataset.camtoworlds[..., :3, :4],
+            out_original,
+            te_original,
+            re_original,
+            out_inlier,
+            te_inlier,
+            re_inlier,
+            outlier_pct,
+        )
 
     @torch.no_grad()
     def get_pose_align(self):
         est_poses = self.get_pose_by_camera()
-        out, te, re, R0, s, t = sim3_align_errors(
+        out, te, re, _, _, _ = sim3_align_errors(
             self.train_dataset.camtoworlds[..., :3, :4], est_poses
         )
+
+        # Identify outlier poses
+        q1 = torch.quantile(te, 0.25)
+        q3 = torch.quantile(te, 0.75)
+        iqr = q3 - q1
+        upper_fence = q3 + 3.0 * iqr
+        inlier_indices = (te < upper_fence).nonzero(as_tuple=True)[0]
+
+        est_poses_in = est_poses[inlier_indices]
+        gt_poses_in = self.train_dataset.camtoworlds[inlier_indices, :3, :4]
+        out_inlier, te_inlier, re_inlier, R0, s, t = sim3_align_errors(
+            gt_poses_in, est_poses_in
+        )
+
         return R0, s, t
 
     def train_step(self) -> Dict[str, float]:
@@ -159,22 +237,19 @@ class BATrainer(NeRFTrainer):
             return density * self.render_step_size
 
         progress = self.step / self.config.training.max_steps
-        alpha = min(progress / (self.end - self.start), 1.0)
-        target_level = self.init_level * (1.0 - alpha)
+        t = min(progress / (self.end - self.start), 1.0)
+
+        alpha = 0.5 * (1.0 + math.cos(2.0 * math.pi * (4.5 * t))) * math.exp(-3.0 * t)
+        if self.train_dataset.OPENGL_CAMERA:
+            alpha = (
+                0.5 * (1.0 + math.cos(2.0 * math.pi * (2.5 * t))) * math.exp(-3.0 * t)
+            )
+
+        target_level = self.init_level * alpha
 
         # Sample training data
         i = torch.randint(0, len(self.train_dataset), (1,)).item()
         data = self.train_dataset[i]
-
-        """
-        contains:
-            "pixels": pixels,  
-            "color_bkgd": color_bkgd,  
-            "c2w": c2w,
-            "image_id": image_id,
-            "x": x,
-            "y": y,
-        """
 
         render_bkgd = data["color_bkgd"]
         pixels = data["pixels"]
@@ -268,11 +343,28 @@ class BATrainer(NeRFTrainer):
     def print_training_stats(self, metrics: Dict[str, float]):
         """Print training statistics."""
         elapsed_time = time.time() - self.start_time
+
+        gt_poses, est, te, re, est_inlier, te_inlier, re_inlier, outlier_pct = (
+            self.get_pose_error()
+        )
+
         print(
             f"elapsed_time={elapsed_time:.2f}s | step={self.step} | "
             f"loss={metrics['loss']:.5f} | psnr={metrics['psnr']:.2f} | "
             f"num_rays={metrics['num_rays']:d} | "
-            f"max_depth={metrics['max_depth']:.3f} | "
-            f"translation_error={metrics['translation_error']:.3f} | "
-            f"rotation_error={metrics['rotation_error']:.3f}"
+            f"translation_error={te.mean().item():.6f} | "
+            f"rotation_error={re.mean().item():.6f} | "
+            f"translation_error_inlier={te_inlier.mean().item():.6f} | "
+            f"rotation_error_inlier={re_inlier.mean().item():.6f} | "
+            f"outlier_pct={outlier_pct:.6f}"
+        )
+
+        if self.train_dataset.OPENGL_CAMERA:
+            gt_poses = gt_poses.clone()
+            est = est.clone()
+            gt_poses[..., :3, 1:3] *= -1.0
+            est[..., :3, 1:3] *= -1.0
+
+        self.rerun_logger.log_poses_at_frame(
+            gt_poses, est, self.step, self.rerun_factor
         )

@@ -3,7 +3,6 @@ NeRF training pipeline that orchestrates the entire training and evaluation proc
 """
 
 from typing import Dict, Any
-from pathlib import Path
 
 import torch
 
@@ -12,8 +11,6 @@ from trainers.trainer import NeRFTrainer
 from trainers.MLEtrainer import MLETrainer
 from trainers.BAtrainer import BATrainer
 from trainers.BAevaluator import BAEvaluator
-from utils.rerun import RerunLogger, create_blueprint
-import rerun as rr
 
 
 class NeRFPipeline:
@@ -39,11 +36,6 @@ class NeRFPipeline:
         self.training_history = []
         self.evaluation_history = []
 
-        self.rerun_logger = RerunLogger(Path("world"))
-        blueprint = create_blueprint(Path("world"))
-        rr.init("pose_refinement", spawn=True)
-        rr.send_blueprint(blueprint)
-
     def train(self, verbose: bool = True) -> Dict[str, Any]:
         """
         Run the complete training loop.
@@ -65,25 +57,9 @@ class NeRFPipeline:
             # Log training metrics
             with torch.no_grad():
                 if self.trainer.should_print() and verbose:
-                    gt_poses, est, te, re = self.trainer.get_pose_error()
-                    metrics.update(
-                        {
-                            "translation_error": te.mean().item(),
-                            "rotation_error": re.mean().item(),
-                        }
-                    )
+                    
                     self.trainer.print_training_stats(metrics)
-                    factor = 1
-                    if self.trainer.train_dataset.OPENGL_CAMERA:
-                        gt_poses = gt_poses.clone()
-                        est = est.clone()
-                        gt_poses[..., :3, 1:3] *= -1.0
-                        est[..., :3, 1:3] *= -1.0
-                        factor = 10
-
-                    self.rerun_logger.log_poses_at_frame(
-                        gt_poses, est, self.trainer.step, factor
-                    )
+                    
 
                 # Store metrics
                 metrics["step"] = self.trainer.step

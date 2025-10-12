@@ -23,7 +23,7 @@ class TrainingConfig:
 
     def __post_init__(self):
         if self.print_every is None:
-            self.print_every = self.max_steps // 20
+            self.print_every = self.max_steps // 100
         if self.eval_every is None:
             self.eval_every = self.max_steps // 5
 
