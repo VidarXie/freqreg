@@ -63,7 +63,6 @@ class MLETrainer(NeRFTrainer):
         pixels = data["pixels"]
 
         c2w = data["c2w"]
-        image_id = data["image_id"]
         x = data["x"]
         y = data["y"]
 

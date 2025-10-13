@@ -9,7 +9,6 @@ Usage:
 """
 
 import argparse
-import sys
 
 from config import NeRFConfig
 from pipeline import NeRFPipeline
@@ -118,7 +117,6 @@ def main():
         print("\n" + "=" * 50)
         print("Training completed successfully!")
         print("=" * 50)
-
 
 
 if __name__ == "__main__":

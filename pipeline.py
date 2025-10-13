@@ -7,8 +7,9 @@ from typing import Dict, Any
 import torch
 
 from config import NeRFConfig
-from trainers.trainer import NeRFTrainer
-from trainers.MLEtrainer import MLETrainer
+
+# from trainers.trainer import NeRFTrainer
+# from trainers.MLEtrainer import MLETrainer
 from trainers.BAtrainer import BATrainer
 from trainers.BAevaluator import BAEvaluator
 
@@ -57,9 +58,7 @@ class NeRFPipeline:
             # Log training metrics
             with torch.no_grad():
                 if self.trainer.should_print() and verbose:
-                    
                     self.trainer.print_training_stats(metrics)
-                    
 
                 # Store metrics
                 metrics["step"] = self.trainer.step
@@ -90,15 +89,3 @@ class NeRFPipeline:
             "training_history": self.training_history,
             "evaluation_history": self.evaluation_history,
         }
-
-    def render_test_image(self, image_idx: int) -> Dict[str, Any]:
-        """
-        Render a specific test image.
-
-        Args:
-            image_idx: Index of test image to render
-
-        Returns:
-            Rendering results including metrics and images
-        """
-        return self.evaluator.evaluate_single_image(image_idx)

@@ -1,6 +1,5 @@
 import rerun as rr
 import rerun.blueprint as rrb
-import torch
 import numpy as np
 
 
@@ -34,7 +33,7 @@ class RerunLogger:
 
         # Extract camera centers using the same method as get_camera_mesh
         # Camera center is at (0, 0, 0) in camera coordinates
-        gt_centers_np = gt_poses[..., 3].detach().cpu().numpy() 
+        gt_centers_np = gt_poses[..., 3].detach().cpu().numpy()
         gt_rotations_np = gt_poses[..., :3, :3].detach().cpu().numpy()
 
         # Log all ground truth camera centers
@@ -61,7 +60,9 @@ class RerunLogger:
             )
             rr.log(
                 f"{gt_cam_log_path}/{i}/frustum",
-                rr.LineStrips3D(strips=line_stips, colors=[0, 0, 255], radii=0.001 * factor),
+                rr.LineStrips3D(
+                    strips=line_stips, colors=[0, 0, 255], radii=0.001 * factor
+                ),
             )
 
         # Log predicted poses
@@ -95,7 +96,9 @@ class RerunLogger:
             )
             rr.log(
                 f"{pred_cam_log_path}/{i}/frustum",
-                rr.LineStrips3D(strips=line_stips, colors=[255, 0, 0], radii=0.001 * factor),
+                rr.LineStrips3D(
+                    strips=line_stips, colors=[255, 0, 0], radii=0.001 * factor
+                ),
             )
 
         # Log line segments connecting corresponding GT and predicted camera centers

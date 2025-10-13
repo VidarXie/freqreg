@@ -21,9 +21,10 @@ from trainers.trainer import NeRFTrainer, NGPRadianceField
 
 from utils.lie_utils import LIE_
 from utils.pose_utils import POSE_, sim3_align_errors
-from nerfacc.estimators.occ_grid import OccGridEstimator
-
 from utils.rerun import RerunLogger, create_blueprint
+from utils.irls_utils import robust_weights_from_residuals
+
+from nerfacc.estimators.occ_grid import OccGridEstimator
 
 
 class BATrainer(NeRFTrainer):
@@ -289,7 +290,11 @@ class BATrainer(NeRFTrainer):
 
         # Compute loss
         if alpha < 1.0:
-            loss = self.mle_loss(rgb, pixels)
+            if self.step % 2 == 0:
+                loss = self.irls_loss(rgb, pixels)
+            else:
+                loss = self.mle_loss(rgb, pixels)
+            # loss = self.mle_loss(rgb, pixels)
         else:
             loss = F.smooth_l1_loss(rgb, pixels)
 
@@ -339,6 +344,32 @@ class BATrainer(NeRFTrainer):
         loss += (torch.mean(rgb_render) - torch.mean(rgb_gt)) ** 2
 
         return loss
+
+    def irls_loss(self, rgb, pixels):
+        eps = 1e-8
+        rgb_render = torch.clamp(rgb, min=eps)
+        rgb_gt = torch.clamp(pixels, min=eps)
+
+        # --- IRLS weights from a photometric residual ---
+        # residual per ray (L2 over channels)
+        r = torch.norm(rgb - pixels, dim=-1)  # [N]
+        w_ray, _ = robust_weights_from_residuals(r, scheme="huber")  # [N] in [0,1]
+        w = w_ray.clamp_min(0.0)
+        W = w[:, None].expand_as(rgb_render)  # [N, C]
+
+        def wmean(x):
+            return (W * x).sum() / (W.sum() + eps)
+
+        # Data term:  E_w[ -log f * y ] / E_w[ y ]
+        data_term = wmean(-torch.log(rgb_render) * rgb_gt) / (wmean(rgb_gt) + eps)
+
+        # Normalizer term: log E_w[f]
+        norm_term = torch.log(wmean(rgb_render) + eps)
+
+        # Mean-matching (scale fix): (E_w[f] - E_w[y])^2
+        mean_match = (wmean(rgb_render) - wmean(rgb_gt)) ** 2
+
+        return data_term + norm_term + mean_match
 
     def print_training_stats(self, metrics: Dict[str, float]):
         """Print training statistics."""
