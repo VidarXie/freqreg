@@ -2,7 +2,6 @@
 NeRF trainer class for modular training pipeline.
 """
 
-import itertools
 import time
 from typing import Dict
 
@@ -106,7 +105,7 @@ class NeRFTrainer:
         # )
 
         # Radiance field optimizer
-        self.optimizer = torch.optim.Adam(
+        self.optimizer = torch.optim.AdamW(
             self.radiance_field.parameters(),
             lr=self.config.training.learning_rate,
             eps=self.config.training.eps,
@@ -195,7 +194,6 @@ class NeRFTrainer:
         pixels = data["pixels"]
 
         c2w = data["c2w"]
-        image_id = data["image_id"]
         x = data["x"]
         y = data["y"]
 

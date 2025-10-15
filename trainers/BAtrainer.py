@@ -33,14 +33,14 @@ class BATrainer(NeRFTrainer):
     """
 
     def __init__(self, config: NeRFConfig):
-        self.se3_noise_factor = 0.12
+        self.se3_noise_factor = 0.15
         super().__init__(config)
         self.start = 0.0
         self.end = 0.75
         self.init_level = 6.5
         if self.train_dataset.OPENGL_CAMERA:
             # for blender dataset
-            self.init_level = 5.0
+            self.init_level = 4.0
         self.target_sample_batch_size = 1 << 18
 
         self.rerun_logger = RerunLogger(Path("world"))
@@ -95,7 +95,7 @@ class BATrainer(NeRFTrainer):
 
     def _setup_optimizers(self):
         """Initialize optimizers and schedulers."""
-        self.optimizer = torch.optim.Adam(
+        self.optimizer = torch.optim.AdamW(
             self.radiance_field.parameters(),
             lr=self.config.training.learning_rate,
             eps=self.config.training.eps,
@@ -125,9 +125,9 @@ class BATrainer(NeRFTrainer):
             self.config.training.grad_scaler_init
         )
 
-        self.pose_optimizer = torch.optim.Adam([self.se3_refine], lr=0.001)
+        self.pose_optimizer = torch.optim.AdamW([self.se3_refine], lr=0.001)
         if self.train_dataset.OPENGL_CAMERA:
-            self.pose_optimizer = torch.optim.Adam([self.se3_refine], lr=0.005)
+            self.pose_optimizer = torch.optim.AdamW([self.se3_refine], lr=0.005)
 
         # Schedulers
         pose_opt_milestones = [
@@ -288,13 +288,20 @@ class BATrainer(NeRFTrainer):
             alpha_thre=0.01,
         )
 
+        num_images = len(self.train_dataset)
+        rays_per_image = len(pixels) // num_images
+        rgb_reshaped = rgb.view(num_images, rays_per_image, -1)
+        pixels_reshaped = pixels.view(num_images, rays_per_image, -1)
+        mse_reshaped = F.mse_loss(rgb_reshaped, pixels_reshaped, reduction="none")
+        mse_per_image = mse_reshaped.mean(dim=[1, 2])
+
         # Compute loss
         if alpha < 1.0:
-            if self.step % 2 == 0:
-                loss = self.irls_loss(rgb, pixels)
-            else:
-                loss = self.mle_loss(rgb, pixels)
-            # loss = self.mle_loss(rgb, pixels)
+            # if self.step % 2 == 0:
+            #     loss = self.irls_loss(rgb, pixels)
+            # else:
+            #     loss = self.mle_loss(rgb, pixels)
+            loss = self.mle_loss(rgb, pixels)
         else:
             loss = F.smooth_l1_loss(rgb, pixels)
 
@@ -325,6 +332,22 @@ class BATrainer(NeRFTrainer):
             psnr = -10.0 * torch.log(mse_loss) / torch.log(torch.tensor(10.0))
 
             self.step += 1
+
+        log_mse = torch.log(mse_per_image + 1e-8)
+        normalized_mse = torch.clamp(
+            (log_mse - log_mse.min()) / (log_mse.max() - log_mse.min() + 1e-8),
+            min=0.1,
+        )
+
+        sgld_noise = (
+            torch.randn_like(self.se3_refine)
+            * normalized_mse[:, None]
+            * self.pose_optimizer.param_groups[0]["lr"]
+        )
+
+        warmup_steps = int(0.06 * self.config.training.max_steps)
+
+        self.se3_refine.data += sgld_noise * min(1.0, self.step / warmup_steps)
 
         return {
             "loss": loss.item(),

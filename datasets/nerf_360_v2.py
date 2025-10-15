@@ -249,6 +249,13 @@ class SubjectLoader(torch.utils.data.Dataset):
         self.g = torch.Generator(device=device)
         self.g.manual_seed(42)
 
+        self.rays_per_image = (
+            self.num_rays // len(self.images) if self.num_rays else None
+        )
+        self.total_rays = (
+            self.rays_per_image * len(self.images) if self.rays_per_image else None
+        )
+
     def __len__(self):
         return len(self.images)
 
@@ -282,6 +289,8 @@ class SubjectLoader(torch.utils.data.Dataset):
 
     def update_num_rays(self, num_rays):
         self.num_rays = num_rays
+        self.rays_per_image = self.num_rays // len(self.images)
+        self.total_rays = self.rays_per_image * len(self.images)
 
     def fetch_data(self, index):
         """Fetch the data (it maybe cached for multiple batches)."""
@@ -359,27 +368,22 @@ class SubjectLoader(torch.utils.data.Dataset):
 
     def fetch_data_new(self, index):
         """Fetch the data (it maybe cached for multiple batches)."""
-        num_rays = self.num_rays
-
         if self.training:
-            image_id = torch.randint(
-                0,
-                len(self.images),
-                size=(num_rays,),
-                device=self.images.device,
-                generator=self.g,
+            image_id = torch.repeat_interleave(
+                torch.arange(len(self.images), device=self.images.device),
+                self.rays_per_image,
             )
             x = torch.randint(
                 0,
                 self.width,
-                size=(num_rays,),
+                size=(self.total_rays,),
                 device=self.images.device,
                 generator=self.g,
             )
             y = torch.randint(
                 0,
                 self.height,
-                size=(num_rays,),
+                size=(self.total_rays,),
                 device=self.images.device,
                 generator=self.g,
             )
@@ -398,7 +402,7 @@ class SubjectLoader(torch.utils.data.Dataset):
         c2w = self.camtoworlds[image_id]  # (num_rays, 3, 4)
 
         if self.training:
-            rgb = torch.reshape(rgb, (num_rays, 3))
+            rgb = torch.reshape(rgb, (self.total_rays, 3))
         else:
             rgb = torch.reshape(rgb, (self.height, self.width, 3))
 

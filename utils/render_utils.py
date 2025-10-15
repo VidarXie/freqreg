@@ -156,6 +156,7 @@ def render_image_with_occgrid(
         sum(n_rendering_samples),
     )
 
+
 def render_image_with_propnet(
     # scene
     radiance_field: torch.nn.Module,
@@ -268,8 +269,8 @@ def generate_camera_rays(x, y, c2w, subject) -> Rays:
     viewdirs = directions / torch.linalg.norm(directions, dim=-1, keepdims=True)
 
     if subject.training:
-        origins = torch.reshape(origins, (subject.num_rays, 3))
-        viewdirs = torch.reshape(viewdirs, (subject.num_rays, 3))
+        origins = torch.reshape(origins, (subject.total_rays, 3))
+        viewdirs = torch.reshape(viewdirs, (subject.total_rays, 3))
     else:
         origins = torch.reshape(origins, (subject.height, subject.width, 3))
         viewdirs = torch.reshape(viewdirs, (subject.height, subject.width, 3))
@@ -333,8 +334,8 @@ def generate_camera_rays_with_perturbation(
     viewdirs = directions / torch.linalg.norm(directions, dim=-1, keepdims=True)
 
     if subject.training:
-        origins = torch.reshape(origins, (subject.num_rays, 3))
-        viewdirs = torch.reshape(viewdirs, (subject.num_rays, 3))
+        origins = torch.reshape(origins, (subject.total_rays, 3))
+        viewdirs = torch.reshape(viewdirs, (subject.total_rays, 3))
     else:
         origins = torch.reshape(origins, (subject.height, subject.width, 3))
         viewdirs = torch.reshape(viewdirs, (subject.height, subject.width, 3))
