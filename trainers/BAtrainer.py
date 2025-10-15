@@ -240,10 +240,10 @@ class BATrainer(NeRFTrainer):
         progress = self.step / self.config.training.max_steps
         t = min(progress / (self.end - self.start), 1.0)
 
-        alpha = 0.5 * (1.0 + math.cos(2.0 * math.pi * (4.5 * t))) * math.exp(-3.0 * t)
+        alpha = 0.5 * (1.0 + math.cos(2.0 * math.pi * (5.5 * t))) * math.exp(-3.0 * t)
         if self.train_dataset.OPENGL_CAMERA:
             alpha = (
-                0.5 * (1.0 + math.cos(2.0 * math.pi * (2.5 * t))) * math.exp(-3.0 * t)
+                0.5 * (1.0 + math.cos(2.0 * math.pi * (3.5 * t))) * math.exp(-3.0 * t)
             )
 
         target_level = self.init_level * alpha
@@ -297,11 +297,8 @@ class BATrainer(NeRFTrainer):
 
         # Compute loss
         if alpha < 1.0:
-            # if self.step % 2 == 0:
-            #     loss = self.irls_loss(rgb, pixels)
-            # else:
-            #     loss = self.mle_loss(rgb, pixels)
-            loss = self.mle_loss(rgb, pixels)
+            loss = self.irls_loss(rgb, pixels, mse_per_image)
+            # loss = self.mle_loss(rgb, pixels)
         else:
             loss = F.smooth_l1_loss(rgb, pixels)
 
@@ -368,17 +365,24 @@ class BATrainer(NeRFTrainer):
 
         return loss
 
-    def irls_loss(self, rgb, pixels):
+    def irls_loss(self, rgb, pixels, mse_per_image):
         eps = 1e-8
         rgb_render = torch.clamp(rgb, min=eps)
         rgb_gt = torch.clamp(pixels, min=eps)
 
-        # --- IRLS weights from a photometric residual ---
-        # residual per ray (L2 over channels)
-        r = torch.norm(rgb - pixels, dim=-1)  # [N]
-        w_ray, _ = robust_weights_from_residuals(r, scheme="huber")  # [N] in [0,1]
-        w = w_ray.clamp_min(0.0)
-        W = w[:, None].expand_as(rgb_render)  # [N, C]
+        # --- IRLS weights from a image wise residual ---
+        w_image, _ = robust_weights_from_residuals(
+            mse_per_image, scheme="huber"
+        )  # [N] in [0,1]
+        w_image = w_image.clamp_min(0.0)
+
+        num_images = len(self.train_dataset)
+        rays_per_image = len(pixels) // num_images
+
+        w_ray = w_image.repeat_interleave(
+            rays_per_image
+        )  # [num_images * rays_per_image]
+        W = w_ray[:, None].expand_as(rgb_render)
 
         def wmean(x):
             return (W * x).sum() / (W.sum() + eps)
