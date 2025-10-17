@@ -41,7 +41,6 @@ class BATrainer(NeRFTrainer):
         if self.train_dataset.OPENGL_CAMERA:
             # for blender dataset
             self.init_level = 4.0
-        self.target_sample_batch_size = 1 << 18
 
         self.rerun_logger = RerunLogger(Path("world"))
         blueprint = create_blueprint(Path("world"))

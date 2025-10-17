@@ -20,6 +20,7 @@ def create_config_from_args(args) -> NeRFConfig:
     config = NeRFConfig(
         scene=args.scene,
         data_root=args.data_root,
+        exp_name=args.exp_name,
         train_split=args.train_split,
         test_chunk_size=args.test_chunk_size,
         device=args.device,
@@ -51,6 +52,7 @@ def main():
         choices=NERF_SYNTHETIC_SCENES + MIPNERF360_UNBOUNDED_SCENES,
     )
     parser.add_argument("--data_root", type=str, help="Root directory of the dataset")
+    parser.add_argument("--exp_name", type=str, help="Experiment name for logging")
 
     # Optional training arguments
     parser.add_argument(

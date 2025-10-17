@@ -12,7 +12,6 @@ import torch.nn.functional as F
 import tqdm
 from trainers.trainer import NeRFTrainer
 from utils.render_utils import (
-    render_image_with_propnet,
     generate_camera_rays,
     render_image_with_occgrid,
 )
@@ -169,65 +168,6 @@ class NeRFEvaluator:
             ),
             combined,
         )
-
-    def evaluate_single_image(self, image_idx: int) -> Dict[str, float]:
-        """
-        Evaluate a single image from test dataset.
-
-        Args:
-            image_idx: Index of image to evaluate
-
-        Returns:
-            Dictionary containing metrics for this image
-        """
-        if image_idx >= len(self.trainer.test_dataset):
-            raise ValueError(f"Image index {image_idx} out of range")
-
-        # Set models to evaluation mode
-        self.trainer.radiance_field.eval()
-        for p in self.trainer.proposal_networks:
-            p.eval()
-        self.trainer.estimator.eval()
-
-        with torch.no_grad():
-            data = self.trainer.test_dataset[image_idx]
-            render_bkgd = data["color_bkgd"]
-            rays = data["rays"]
-            pixels = data["pixels"]
-
-            # Render image
-            rgb, acc, depth, extras = render_image_with_propnet(
-                self.trainer.radiance_field,
-                self.trainer.proposal_networks,
-                self.trainer.estimator,
-                rays,
-                # rendering options
-                num_samples=self.config.model.num_samples,
-                num_samples_per_prop=self.config.model.num_samples_per_prop,
-                near_plane=self.config.scene_config.near_plane,
-                far_plane=self.config.scene_config.far_plane,
-                sampling_type=self.config.model.sampling_type,
-                opaque_bkgd=self.config.model.opaque_bkgd,
-                render_bkgd=render_bkgd,
-                # test options
-                test_chunk_size=self.config.test_chunk_size,
-            )
-
-            # Compute metrics
-            mse = F.mse_loss(rgb, pixels)
-            psnr = -10.0 * torch.log(mse) / torch.log(torch.tensor(10.0))
-            lpips_score = self.trainer.lpips_fn(rgb, pixels)
-
-            return {
-                "psnr": psnr.item(),
-                "lpips": lpips_score.item(),
-                "mse": mse.item(),
-                "rgb": rgb,
-                "acc": acc,
-                "depth": depth,
-                "pixels": pixels,
-                "extras": extras,
-            }
 
     def print_evaluation_results(self, results: Dict[str, float]):
         """Print evaluation results in a formatted way."""

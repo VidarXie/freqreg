@@ -44,9 +44,8 @@ class SceneConfig:
 class ModelConfig:
     """Model architecture configuration."""
 
-    proposal_networks_config: List[Dict[str, Any]]
-    num_samples: int
-    num_samples_per_prop: List[int]
+    grid_resolution: tuple
+    grid_nlvl: int
     sampling_type: str
     opaque_bkgd: bool
 
@@ -58,8 +57,10 @@ class NeRFConfig:
     # Basic settings
     scene: str
     data_root: str
+    exp_name: str
     train_split: str = "train"
     test_chunk_size: int = 8192
+    target_sample_batch_size: int = 1 << 18
     device: str = "cuda:0"
     seed: int = 42
 
@@ -98,17 +99,13 @@ class NeRFConfig:
         )
 
         self.model = ModelConfig(
-            proposal_networks_config=[
-                {"n_levels": 5, "max_resolution": 128},
-                {"n_levels": 5, "max_resolution": 256},
-            ],
-            num_samples=48,
-            num_samples_per_prop=[256, 96],
+            grid_resolution=(256, 256, 256),
+            grid_nlvl=5,
             sampling_type="lindisp",
             opaque_bkgd=True,
         )
 
-        self.output_dir = f"./output/{self.scene}_{self.seed}"
+        self.output_dir = f"./output/{self.exp_name}_{self.scene}_{self.seed}"
 
     def _configure_nerf_synthetic(self):
         """Configure for NeRF synthetic scenes."""
@@ -128,9 +125,8 @@ class NeRFConfig:
         )
 
         self.model = ModelConfig(
-            proposal_networks_config=[{"n_levels": 5, "max_resolution": 128}],
-            num_samples=64,
-            num_samples_per_prop=[128],
+            grid_resolution=(128, 128, 128),
+            grid_nlvl=4,
             sampling_type="uniform",
             opaque_bkgd=False,
         )

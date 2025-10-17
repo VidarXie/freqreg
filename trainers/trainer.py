@@ -33,7 +33,7 @@ class NeRFTrainer:
         """
         self.config = config
         self.device = config.device
-        self.target_sample_batch_size = 1 << 18
+        self.target_sample_batch_size = config.target_sample_batch_size
 
         # Set random seed
         set_random_seed(config.seed)
@@ -79,11 +79,11 @@ class NeRFTrainer:
         aabb = self.config.to_torch_aabb()
 
         # NOTE: hard-coded grid resolution and levels
-        grid_resolution = (128, 128, 128)
-        grid_nlvl = 4
         self.render_step_size = 5e-3
         self.estimator = OccGridEstimator(
-            roi_aabb=aabb, resolution=grid_resolution, levels=grid_nlvl
+            roi_aabb=aabb,
+            resolution=self.config.model.grid_resolution,
+            levels=self.config.model.grid_nlvl,
         ).to(self.device)
         # Create main radiance field
         self.radiance_field = NGPRadianceField(
