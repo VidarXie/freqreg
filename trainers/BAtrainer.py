@@ -33,7 +33,7 @@ class BATrainer(NeRFTrainer):
     """
 
     def __init__(self, config: NeRFConfig):
-        self.se3_noise_factor = 0.15
+        self.se3_noise_factor = 0.02
         super().__init__(config)
         self.start = 0.0
         self.end = 0.75
@@ -296,7 +296,9 @@ class BATrainer(NeRFTrainer):
         mse_per_image = mse_reshaped.mean(dim=[1, 2])
 
         # Compute loss
-        if alpha < 1.0:
+        if alpha < 0.1:
+            loss = self.mle_loss(rgb, pixels)
+        elif alpha < 1.0 and alpha >= 0.1:
             loss = self.irls_loss(rgb, pixels, mse_per_image)
             # loss = self.mle_loss(rgb, pixels)
         else:
@@ -371,9 +373,7 @@ class BATrainer(NeRFTrainer):
         rgb_gt = torch.clamp(pixels, min=eps)
 
         # --- IRLS weights from a image wise residual ---
-        w_image, _ = robust_weights_from_residuals(
-            mse_per_image, scheme="huber"
-        )  # [N] in [0,1]
+        w_image, _ = robust_weights_from_residuals(mse_per_image)  # [N] in [0,1]
         w_image = w_image.clamp_min(0.0)
 
         num_images = len(self.train_dataset)
