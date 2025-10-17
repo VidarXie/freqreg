@@ -9,7 +9,7 @@ import torch.nn.functional as F
 
 from config import NeRFConfig
 from utils.render_utils import (
-    render_image_with_propnet,
+    render_image_with_occgrid,
     generate_camera_rays_with_perturbation,
 )
 
@@ -36,8 +36,6 @@ class MLETrainer(NeRFTrainer):
         """
         # Set models to training mode
         self.radiance_field.train()
-        for p in self.proposal_networks:
-            p.train()
         self.estimator.train()
 
         # Calculate progress factor and target level
@@ -45,19 +43,13 @@ class MLETrainer(NeRFTrainer):
         alpha = min(progress / (self.end - self.start), 1.0)
         target_level = self.init_level * (1.0 - alpha)
 
+        def occ_eval_fn(x):
+            density = self.radiance_field.query_density(x)
+            return density * self.render_step_size
+
         # Sample training data
         i = torch.randint(0, len(self.train_dataset), (1,)).item()
         data = self.train_dataset[i]
-
-        """
-        contains:
-            "pixels": pixels,  
-            "color_bkgd": color_bkgd,  
-            "c2w": c2w,
-            "image_id": image_id,
-            "x": x,
-            "y": y,
-        """
 
         render_bkgd = data["color_bkgd"]
         pixels = data["pixels"]
@@ -71,30 +63,25 @@ class MLETrainer(NeRFTrainer):
             x, y, c2w, self.train_dataset, target_level
         )
 
-        # Determine if proposal networks need gradients
-        proposal_requires_grad = self.proposal_requires_grad_fn(self.step)
+        # update occupancy grid
+        self.estimator.update_every_n_steps(
+            step=self.step,
+            occ_eval_fn=occ_eval_fn,
+            occ_thre=1e-2,
+        )
 
-        # Render
-        rgb, acc, depth, extras = render_image_with_propnet(
+        # render
+        # NOTE: hard-coded cone alpha
+        rgb, acc, depth, n_rendering_samples = render_image_with_occgrid(
             self.radiance_field,
-            self.proposal_networks,
             self.estimator,
             rays,
             # rendering options
-            num_samples=self.config.model.num_samples,
-            num_samples_per_prop=self.config.model.num_samples_per_prop,
             near_plane=self.config.scene_config.near_plane,
-            far_plane=self.config.scene_config.far_plane,
-            sampling_type=self.config.model.sampling_type,
-            opaque_bkgd=self.config.model.opaque_bkgd,
+            render_step_size=self.render_step_size,
             render_bkgd=render_bkgd,
-            # train options
-            proposal_requires_grad=proposal_requires_grad,
-        )
-
-        # Update estimator
-        self.estimator.update_every_n_steps(
-            extras["trans"], proposal_requires_grad, loss_scaler=1024
+            cone_angle=0.004,
+            alpha_thre=0.01,
         )
 
         # Compute MLE loss
@@ -104,16 +91,28 @@ class MLETrainer(NeRFTrainer):
             loss = F.smooth_l1_loss(rgb, pixels)
 
         # Backward pass
-        self.optimizer.zero_grad()
+        torch.autograd.set_detect_anomaly(True)
+        self.optimizer.zero_grad(set_to_none=True)
         self.grad_scaler.scale(loss).backward()
+
         self.optimizer.step()
         self.scheduler.step()
 
-        # Compute metrics
-        mse_loss = F.mse_loss(rgb, pixels)
-        psnr = -10.0 * torch.log(mse_loss) / torch.log(torch.tensor(10.0))
+        if self.target_sample_batch_size > 0:
+            # dynamic batch size for rays to keep sample batch size constant.
+            num_rays = len(pixels)
+            num_rays = int(
+                num_rays
+                * max((self.target_sample_batch_size / float(n_rendering_samples)), 1.0)
+            )
+            self.train_dataset.update_num_rays(num_rays)
 
-        self.step += 1
+        with torch.no_grad():
+            # Compute metrics
+            mse_loss = F.mse_loss(rgb, pixels)
+            psnr = -10.0 * torch.log(mse_loss) / torch.log(torch.tensor(10.0))
+
+            self.step += 1
 
         return {
             "loss": loss.item(),
