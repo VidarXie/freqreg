@@ -1,10 +1,10 @@
 To run: 
 
-python main.py --scene lego --data_root data/nerf_synthetic
+python main.py --scene lego --data_root data/nerf_synthetic --exp_name test
 
 or
-
-python main.py --scene garden --data_root data/360_v2
+ 
+python main.py --scene garden --data_root data/360_v2 --exp_name test
 
 modify pipeline.py line 28-29 to see the performance of MLEtrainer
 the same for BAtrainer
