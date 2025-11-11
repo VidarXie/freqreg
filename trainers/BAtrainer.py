@@ -299,7 +299,6 @@ class BATrainer(NeRFTrainer):
             loss = self.mle_loss(rgb, pixels)
         elif alpha < 1.0 and alpha >= 0.1:
             loss = self.irls_loss(rgb, pixels, mse_per_image)
-            # loss = self.mle_loss(rgb, pixels)
         else:
             loss = F.smooth_l1_loss(rgb, pixels)
 

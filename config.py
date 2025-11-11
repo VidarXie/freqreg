@@ -131,7 +131,7 @@ class NeRFConfig:
             opaque_bkgd=False,
         )
 
-        self.output_dir = f"./output/{self.scene}_{self.seed}"
+        self.output_dir = f"./output/{self.exp_name}_{self.scene}_{self.seed}"
 
     def get_dataset_class(self):
         """Get appropriate dataset class based on scene type."""
