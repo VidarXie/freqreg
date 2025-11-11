@@ -51,6 +51,7 @@ class BATrainer(NeRFTrainer):
         if self.train_dataset.OPENGL_CAMERA:
             # for blender dataset
             self.rerun_factor = 8.0
+        self.rerun_step = 0
 
         print("=" * 20)
         print("Using BA trainer")
@@ -295,10 +296,8 @@ class BATrainer(NeRFTrainer):
         mse_per_image = mse_reshaped.mean(dim=[1, 2])
 
         # Compute loss
-        if alpha < 0.1:
+        if alpha < 1.0:
             loss = self.mle_loss(rgb, pixels)
-        elif alpha < 1.0 and alpha >= 0.1:
-            loss = self.irls_loss(rgb, pixels, mse_per_image)
         else:
             loss = F.smooth_l1_loss(rgb, pixels)
 
@@ -342,7 +341,7 @@ class BATrainer(NeRFTrainer):
             * self.pose_optimizer.param_groups[0]["lr"]
         )
 
-        warmup_steps = int(0.06 * self.config.training.max_steps)
+        warmup_steps = int(0.1 * self.config.training.max_steps)
 
         self.se3_refine.data += sgld_noise * min(1.0, self.step / warmup_steps)
 
@@ -422,5 +421,6 @@ class BATrainer(NeRFTrainer):
             est[..., :3, 1:3] *= -1.0
 
         self.rerun_logger.log_poses_at_frame(
-            gt_poses, est, self.step, self.rerun_factor
+            gt_poses, est, self.rerun_step, self.rerun_factor
         )
+        self.rerun_step += 1
