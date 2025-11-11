@@ -133,12 +133,21 @@ class NeRFConfig:
 
         self.output_dir = f"./output/{self.exp_name}_{self.scene}_{self.seed}"
 
-    def get_dataset_class(self):
+    def get_dataset_class(self, fewshot: bool = False):
         """Get appropriate dataset class based on scene type."""
-        if self.scene in MIPNERF360_UNBOUNDED_SCENES:
-            from datasets.nerf_360_v2 import SubjectLoader
+        if not fewshot:
+            if self.scene in MIPNERF360_UNBOUNDED_SCENES:
+                from datasets.nerf_360_v2 import SubjectLoader
+            else:
+                from datasets.nerf_synthetic import SubjectLoader
         else:
-            from datasets.nerf_synthetic import SubjectLoader
+            if self.scene in MIPNERF360_UNBOUNDED_SCENES:
+                raise NotImplementedError("Few-shot not implemented for MipNeRF360.")
+            else:
+                from datasets.fewshot_synthetic import (
+                    FewShotSyntheticLoader as SubjectLoader,
+                )
+
         return SubjectLoader
 
     def to_torch_aabb(self) -> torch.Tensor:

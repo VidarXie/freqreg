@@ -54,7 +54,7 @@ class NeRFTrainer:
 
     def _setup_datasets(self):
         """Initialize training and test datasets."""
-        SubjectLoader = self.config.get_dataset_class()
+        SubjectLoader = self.config.get_dataset_class(fewshot=True)
 
         self.train_dataset = SubjectLoader(
             subject_id=self.config.scene,
