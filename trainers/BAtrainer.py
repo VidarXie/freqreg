@@ -21,6 +21,7 @@ from trainers.trainer import NeRFTrainer, NGPRadianceField
 
 from utils.lie_utils import LIE_
 from utils.pose_utils import POSE_, sim3_align_errors
+from utils.optimizer import AdamUniform
 from utils.rerun import RerunLogger, create_blueprint
 from utils.irls_utils import robust_weights_from_residuals
 
@@ -95,11 +96,12 @@ class BATrainer(NeRFTrainer):
 
     def _setup_optimizers(self):
         """Initialize optimizers and schedulers."""
-        self.optimizer = torch.optim.AdamW(
-            self.radiance_field.parameters(),
+        # self.optimizer = torch.optim.AdamW(
+        self.optimizer = AdamUniform(
+            list(self.radiance_field.parameters())[1:],
             lr=self.config.training.learning_rate,
-            eps=self.config.training.eps,
-            weight_decay=self.config.training.weight_decay,
+            # eps=self.config.training.eps,
+            # weight_decay=self.config.training.weight_decay,
         )
 
         # Schedulers
@@ -307,7 +309,7 @@ class BATrainer(NeRFTrainer):
         self.pose_optimizer.zero_grad(set_to_none=True)
         self.grad_scaler.scale(loss).backward()
 
-        self.optimizer.step()
+        self.optimizer.step(1)
         self.scheduler.step()
 
         self.pose_optimizer.step()
@@ -334,16 +336,16 @@ class BATrainer(NeRFTrainer):
             (log_mse - log_mse.min()) / (log_mse.max() - log_mse.min() + 1e-8),
             min=0.1,
         )
+        with torch.no_grad():
+            sgld_noise = (
+                torch.randn_like(self.se3_refine)
+                * normalized_mse[:, None]
+                * self.pose_optimizer.param_groups[0]["lr"]
+            )
 
-        sgld_noise = (
-            torch.randn_like(self.se3_refine)
-            * normalized_mse[:, None]
-            * self.pose_optimizer.param_groups[0]["lr"]
-        )
+            warmup_steps = int(0.1 * self.config.training.max_steps)
 
-        warmup_steps = int(0.1 * self.config.training.max_steps)
-
-        self.se3_refine.data += sgld_noise * min(1.0, self.step / warmup_steps)
+            self.se3_refine.data += sgld_noise * min(1.0, self.step / warmup_steps)
 
         return {
             "loss": loss.item(),
