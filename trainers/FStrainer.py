@@ -12,20 +12,52 @@ from utils.render_utils import (
     render_image_with_occgrid,
     generate_camera_rays_with_perturbation,
 )
+from utils.optimizer_utils import AdamLD
 
 from trainers.trainer import NeRFTrainer
 
 
-class MLETrainer(NeRFTrainer):
+class FSTrainer(NeRFTrainer):
     """
-    Modular NeRF trainer with proposal networks.
+    Modular Few Shot NeRF trainer.
     """
 
     def __init__(self, config: NeRFConfig):
         super().__init__(config)
         self.start = 0.0
-        self.end = 0.75
+        self.end = 0.80
         self.init_level = 4.0
+
+    def _setup_optimizers(self):
+        """Initialize optimizers and schedulers."""
+        self.optimizer = AdamLD(
+            list(self.radiance_field.parameters())[1:],
+            lr=self.config.training.learning_rate,
+            noise_factor=0.99,
+        )
+
+        # Schedulers
+        milestones = [
+            self.config.training.max_steps // 2,
+            self.config.training.max_steps * 3 // 4,
+            self.config.training.max_steps * 9 // 10,
+        ]
+
+        self.scheduler = torch.optim.lr_scheduler.ChainedScheduler(
+            [
+                torch.optim.lr_scheduler.LinearLR(
+                    self.optimizer, start_factor=0.01, total_iters=100
+                ),
+                torch.optim.lr_scheduler.MultiStepLR(
+                    self.optimizer, milestones=milestones, gamma=0.33
+                ),
+            ]
+        )
+
+        # Gradient scaler
+        self.grad_scaler = torch.cuda.amp.GradScaler(
+            self.config.training.grad_scaler_init
+        )
 
     def train_step(self) -> Dict[str, float]:
         """
@@ -84,11 +116,27 @@ class MLETrainer(NeRFTrainer):
             alpha_thre=0.01,
         )
 
+        white_thr = 0.99
+        bkgd_mask = pixels.mean(dim=-1) > white_thr
+        tau = 0.01  # set >0 (e.g., 0.01) if you want a small allowed haze
+        acc_flat = acc.squeeze(-1)
+        occ_pen_hinge = torch.relu(acc_flat - tau)  # pushes acc -> 0
+        loss_bkgd = (
+            occ_pen_hinge[bkgd_mask].mean()
+            if bkgd_mask.any()
+            else acc_flat.new_zeros(())
+        )
+
         # Compute MLE loss
         if alpha < 1.0:
             loss = self.mle_loss(rgb, pixels)
         else:
             loss = F.smooth_l1_loss(rgb, pixels)
+
+        loss += 0.01 * loss_bkgd
+
+        for param_group in self.optimizer.param_groups:
+            param_group["noise_factor"] = (1.0 - alpha) * 0.99
 
         # Backward pass
         torch.autograd.set_detect_anomaly(True)

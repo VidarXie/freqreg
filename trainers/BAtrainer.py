@@ -21,9 +21,9 @@ from trainers.trainer import NeRFTrainer, NGPRadianceField
 
 from utils.lie_utils import LIE_
 from utils.pose_utils import POSE_, sim3_align_errors
-from utils.optimizer import AdamUniform
 from utils.rerun import RerunLogger, create_blueprint
-from utils.irls_utils import robust_weights_from_residuals
+from utils.optimizer_utils import AdamLD, AdamUniform
+from utils.render_utils import NERF_SYNTHETIC_SCENES
 
 from nerfacc.estimators.occ_grid import OccGridEstimator
 
@@ -35,11 +35,16 @@ class BATrainer(NeRFTrainer):
 
     def __init__(self, config: NeRFConfig):
         self.se3_noise_factor = 0.02
+        if config.scene in NERF_SYNTHETIC_SCENES:
+            # for blender dataset
+            self.se3_noise_factor = 0.12
+
         super().__init__(config)
         self.start = 0.0
         self.end = 0.75
+
         self.init_level = 6.5
-        if self.train_dataset.OPENGL_CAMERA:
+        if config.scene in NERF_SYNTHETIC_SCENES:
             # for blender dataset
             self.init_level = 4.0
 
@@ -49,7 +54,7 @@ class BATrainer(NeRFTrainer):
         rr.send_blueprint(blueprint)
 
         self.rerun_factor = 1.0
-        if self.train_dataset.OPENGL_CAMERA:
+        if config.scene in NERF_SYNTHETIC_SCENES:
             # for blender dataset
             self.rerun_factor = 8.0
         self.rerun_step = 0
@@ -96,12 +101,10 @@ class BATrainer(NeRFTrainer):
 
     def _setup_optimizers(self):
         """Initialize optimizers and schedulers."""
-        # self.optimizer = torch.optim.AdamW(
-        self.optimizer = AdamUniform(
+        self.optimizer = AdamLD(
             list(self.radiance_field.parameters())[1:],
             lr=self.config.training.learning_rate,
-            # eps=self.config.training.eps,
-            # weight_decay=self.config.training.weight_decay,
+            noise_factor=0.99,
         )
 
         # Schedulers
@@ -243,7 +246,7 @@ class BATrainer(NeRFTrainer):
         t = min(progress / (self.end - self.start), 1.0)
 
         alpha = 0.5 * (1.0 + math.cos(2.0 * math.pi * (5.5 * t))) * math.exp(-3.0 * t)
-        if self.train_dataset.OPENGL_CAMERA:
+        if self.config.scene in NERF_SYNTHETIC_SCENES:
             alpha = (
                 0.5 * (1.0 + math.cos(2.0 * math.pi * (3.5 * t))) * math.exp(-3.0 * t)
             )
@@ -303,13 +306,16 @@ class BATrainer(NeRFTrainer):
         else:
             loss = F.smooth_l1_loss(rgb, pixels)
 
+        for param_group in self.optimizer.param_groups:
+            param_group["noise_factor"] = alpha * 0.99
+
         # Backward pass
         torch.autograd.set_detect_anomaly(True)
         self.optimizer.zero_grad(set_to_none=True)
         self.pose_optimizer.zero_grad(set_to_none=True)
         self.grad_scaler.scale(loss).backward()
 
-        self.optimizer.step(1)
+        self.optimizer.step()
         self.scheduler.step()
 
         self.pose_optimizer.step()
@@ -333,7 +339,7 @@ class BATrainer(NeRFTrainer):
 
         log_mse = torch.log(mse_per_image + 1e-8)
         normalized_mse = torch.clamp(
-            (log_mse - log_mse.min()) / (log_mse.max() - log_mse.min() + 1e-8),
+            ((log_mse - log_mse.min()) / (log_mse.max() - log_mse.min() + 1e-8)) ** 2,
             min=0.1,
         )
         with torch.no_grad():
@@ -343,7 +349,7 @@ class BATrainer(NeRFTrainer):
                 * self.pose_optimizer.param_groups[0]["lr"]
             )
 
-            warmup_steps = int(0.1 * self.config.training.max_steps)
+            warmup_steps = int(0.01 * self.config.training.max_steps)
 
             self.se3_refine.data += sgld_noise * min(1.0, self.step / warmup_steps)
 
@@ -366,37 +372,6 @@ class BATrainer(NeRFTrainer):
 
         return loss
 
-    def irls_loss(self, rgb, pixels, mse_per_image):
-        eps = 1e-8
-        rgb_render = torch.clamp(rgb, min=eps)
-        rgb_gt = torch.clamp(pixels, min=eps)
-
-        # --- IRLS weights from a image wise residual ---
-        w_image, _ = robust_weights_from_residuals(mse_per_image)  # [N] in [0,1]
-        w_image = w_image.clamp_min(0.0)
-
-        num_images = len(self.train_dataset)
-        rays_per_image = len(pixels) // num_images
-
-        w_ray = w_image.repeat_interleave(
-            rays_per_image
-        )  # [num_images * rays_per_image]
-        W = w_ray[:, None].expand_as(rgb_render)
-
-        def wmean(x):
-            return (W * x).sum() / (W.sum() + eps)
-
-        # Data term:  E_w[ -log f * y ] / E_w[ y ]
-        data_term = wmean(-torch.log(rgb_render) * rgb_gt) / (wmean(rgb_gt) + eps)
-
-        # Normalizer term: log E_w[f]
-        norm_term = torch.log(wmean(rgb_render) + eps)
-
-        # Mean-matching (scale fix): (E_w[f] - E_w[y])^2
-        mean_match = (wmean(rgb_render) - wmean(rgb_gt)) ** 2
-
-        return data_term + norm_term + mean_match
-
     def print_training_stats(self, metrics: Dict[str, float]):
         """Print training statistics."""
         elapsed_time = time.time() - self.start_time
@@ -416,7 +391,7 @@ class BATrainer(NeRFTrainer):
             f"outlier_pct={outlier_pct:.6f}"
         )
 
-        if self.train_dataset.OPENGL_CAMERA:
+        if self.config.scene in NERF_SYNTHETIC_SCENES:
             gt_poses = gt_poses.clone()
             est = est.clone()
             gt_poses[..., :3, 1:3] *= -1.0

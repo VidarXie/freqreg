@@ -58,6 +58,7 @@ class NeRFConfig:
     scene: str
     data_root: str
     exp_name: str
+    task: str = "ba"  # Options: ba, fs
     train_split: str = "train"
     test_chunk_size: int = 8192
     target_sample_batch_size: int = 1 << 18

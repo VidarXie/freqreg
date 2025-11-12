@@ -21,6 +21,7 @@ def create_config_from_args(args) -> NeRFConfig:
         scene=args.scene,
         data_root=args.data_root,
         exp_name=args.exp_name,
+        task=args.task,
         train_split=args.train_split,
         test_chunk_size=args.test_chunk_size,
         device=args.device,
@@ -53,6 +54,9 @@ def main():
     )
     parser.add_argument("--data_root", type=str, help="Root directory of the dataset")
     parser.add_argument("--exp_name", type=str, help="Experiment name for logging")
+    parser.add_argument(
+        "--task", type=str, default="ba", choices=["ba", "fs"], help="Task type"
+    )
 
     # Optional training arguments
     parser.add_argument(

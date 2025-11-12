@@ -10,7 +10,7 @@ from config import NeRFConfig
 
 # from trainers.trainer import NeRFTrainer
 
-from trainers.MLEtrainer import MLETrainer
+from trainers.FStrainer import FSTrainer
 from trainers.BAtrainer import BATrainer
 from trainers.BAevaluator import BAEvaluator
 
@@ -32,10 +32,12 @@ class NeRFPipeline:
         self.config = config
 
         # Initialize trainer and evaluator
-        self.trainer = BATrainer(config)
-        self.evaluator = BAEvaluator(self.trainer, save_images=True)
-        # self.trainer = MLETrainer(config)
-        # self.evaluator = NeRFEvaluator(self.trainer, save_images=True)
+        if self.config.task == "ba":
+            self.trainer = BATrainer(config)
+            self.evaluator = BAEvaluator(self.trainer, save_images=True)
+        elif self.config.task == "fs":
+            self.trainer = FSTrainer(config)
+            self.evaluator = NeRFEvaluator(self.trainer, save_images=True)
 
         # Training history
         self.training_history = []
