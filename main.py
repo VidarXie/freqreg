@@ -12,7 +12,10 @@ import argparse
 
 from config import NeRFConfig
 from pipeline import NeRFPipeline
-from utils.render_utils import NERF_SYNTHETIC_SCENES, MIPNERF360_UNBOUNDED_SCENES
+from utils.render_utils import (
+    NERF_SYNTHETIC_SCENES,
+    MIPNERF360_UNBOUNDED_SCENES,
+)
 
 
 def create_config_from_args(args) -> NeRFConfig:
@@ -55,7 +58,7 @@ def main():
     parser.add_argument("--data_root", type=str, help="Root directory of the dataset")
     parser.add_argument("--exp_name", type=str, help="Experiment name for logging")
     parser.add_argument(
-        "--task", type=str, default="ba", choices=["ba", "fs"], help="Task type"
+        "--task", type=str, default="ba", choices=["ba", "fs", "nerf"], help="Task type"
     )
 
     # Optional training arguments

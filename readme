@@ -6,4 +6,4 @@ or
 
 python main.py --scene garden --data_root data/360_v2 --exp_name garden_fstrainer --task fs
 
---task supports "ba" (bundle-adjusting) and "fs" (few-shot) 
+--task supports "ba" (bundle-adjusting) and "fs" (few-shot), and "nerf" (standard NeRF training).

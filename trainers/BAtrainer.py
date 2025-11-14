@@ -22,7 +22,7 @@ from trainers.trainer import NeRFTrainer, NGPRadianceField
 from utils.lie_utils import LIE_
 from utils.pose_utils import POSE_, sim3_align_errors
 from utils.rerun import RerunLogger, create_blueprint
-from utils.optimizer_utils import AdamLD, AdamUniform
+from utils.optimizer_utils import AdamLD
 from utils.render_utils import NERF_SYNTHETIC_SCENES
 
 from nerfacc.estimators.occ_grid import OccGridEstimator
@@ -37,7 +37,7 @@ class BATrainer(NeRFTrainer):
         self.se3_noise_factor = 0.02
         if config.scene in NERF_SYNTHETIC_SCENES:
             # for blender dataset
-            self.se3_noise_factor = 0.12
+            self.se3_noise_factor = 0.16
 
         super().__init__(config)
         self.start = 0.0

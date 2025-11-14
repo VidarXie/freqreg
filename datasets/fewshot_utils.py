@@ -7,7 +7,6 @@ spatial clustering and encourage uniform coverage of the scene.
 
 from __future__ import annotations
 
-from typing import Literal, Optional
 import numpy as np
 import torch
 
@@ -47,54 +46,6 @@ def look_dirs(c2w_np: np.ndarray, opengl_camera: bool = True) -> torch.Tensor:
     return -z_col if opengl_camera else z_col
 
 
-def uniform_index_indices(n: int, k: int) -> np.ndarray:
-    """Evenly spaced indices from [0, n-1]."""
-    if k <= 1:
-        return np.array([0], dtype=np.int64)
-    idx = np.round(np.linspace(0, n - 1, num=k)).astype(np.int64)
-    return np.unique(idx)
-
-
-def stratified_angle_indices(
-    c2w_np: np.ndarray, k: int, bins: int, seed: int
-) -> np.ndarray:
-    """Round-robin selection over azimuth angle bins to prevent clustering.
-
-    Args:
-        c2w_np: [N, 3, 4] camera-to-world matrices.
-        k: number of cameras to select.
-        bins: number of azimuth bins.
-        seed: RNG seed for tie-breaking inside bins.
-
-    Returns:
-        np.ndarray of shape [k] with selected indices.
-    """
-    g = np.random.default_rng(seed)
-    pos = camera_positions(c2w_np).numpy()  # [N,3]
-    # azimuth around the origin (x,z)
-    ang = (np.arctan2(pos[:, 0], pos[:, 2]) + 2 * np.pi) % (2 * np.pi)  # [0, 2π)
-    bin_ids = np.floor(bins * ang / (2 * np.pi)).astype(int)
-    N = len(pos)
-    per_bin = [[] for _ in range(bins)]
-    for i in range(N):
-        per_bin[bin_ids[i]].append(i)
-
-    # shuffle each bin so we don't always start with the first frame
-    for b in range(bins):
-        g.shuffle(per_bin[b])
-
-    chosen = []
-    ptr = [0] * bins
-    while len(chosen) < min(k, N) and any(
-        ptr[b] < len(per_bin[b]) for b in range(bins)
-    ):
-        for b in range(bins):
-            if ptr[b] < len(per_bin[b]) and len(chosen) < k:
-                chosen.append(per_bin[b][ptr[b]])
-                ptr[b] += 1
-    return np.array(chosen, dtype=np.int64)
-
-
 def _fps_indices(features: torch.Tensor, k: int, seed: int) -> np.ndarray:
     """Farthest Point Sampling on feature vectors [N, D] (CPU torch)."""
     N = features.shape[0]
@@ -120,9 +71,6 @@ def _fps_indices(features: torch.Tensor, k: int, seed: int) -> np.ndarray:
 def choose_camera_indices(
     camtoworlds: np.ndarray,
     k: int,
-    mode: Literal["uniform_index", "stratified_angle", "fps_pose"] = "fps_pose",
-    angle_bins: int = 8,
-    orient_weight: float = 0.0,
     seed: int = 0,
 ) -> np.ndarray:
     """Select k camera indices with good coverage.
@@ -145,13 +93,6 @@ def choose_camera_indices(
     """
     N = camtoworlds.shape[0]
     k = max(1, min(k, N))
-
-    if mode == "uniform_index":
-        return uniform_index_indices(N, k)
-
-    if mode == "stratified_angle":
-        return stratified_angle_indices(camtoworlds, k, angle_bins, seed)
-
     # fps_pose (default)
     pos = camera_positions(camtoworlds)  # [N,3] torch
     # Normalize positions for scale invariance
@@ -159,11 +100,6 @@ def choose_camera_indices(
     denom = pos.norm(dim=1, keepdim=True).median().clamp_min(1e-6)
     pos = pos / denom
 
-    if orient_weight > 0.0:
-        look = look_dirs(camtoworlds, opengl_camera=True)  # [N,3]
-        look = look / (look.norm(dim=1, keepdim=True).clamp_min(1e-6))
-        feats = torch.cat([pos, orient_weight * look], dim=1)  # [N,6]
-    else:
-        feats = pos  # [N,3]
+    feats = pos  # [N,3]
 
     return _fps_indices(feats.contiguous(), k, seed)

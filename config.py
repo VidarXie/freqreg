@@ -5,7 +5,10 @@ Configuration classes for NeRF training pipeline.
 from dataclasses import dataclass
 from typing import List, Optional, Dict, Any
 import torch
-from utils.render_utils import MIPNERF360_UNBOUNDED_SCENES, NERF_SYNTHETIC_SCENES
+from utils.render_utils import (
+    MIPNERF360_UNBOUNDED_SCENES,
+    NERF_SYNTHETIC_SCENES,
+)
 
 
 @dataclass
@@ -143,7 +146,7 @@ class NeRFConfig:
                 from datasets.nerf_synthetic import SubjectLoader
         else:
             if self.scene in MIPNERF360_UNBOUNDED_SCENES:
-                raise NotImplementedError("Few-shot not implemented for MipNeRF360.")
+                from datasets.fewshot_360 import FewShotColmapLoader as SubjectLoader
             else:
                 from datasets.fewshot_synthetic import (
                     FewShotSyntheticLoader as SubjectLoader,

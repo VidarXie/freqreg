@@ -13,7 +13,7 @@ from utils.render_utils import (
     generate_camera_rays_with_perturbation,
 )
 from utils.optimizer_utils import AdamLD
-
+from utils.render_utils import NERF_SYNTHETIC_SCENES
 from trainers.trainer import NeRFTrainer
 
 
@@ -26,7 +26,10 @@ class FSTrainer(NeRFTrainer):
         super().__init__(config)
         self.start = 0.0
         self.end = 0.80
-        self.init_level = 4.0
+        self.init_level = 6.5
+        if config.scene in NERF_SYNTHETIC_SCENES:
+            # for blender dataset
+            self.init_level = 4.0
 
     def _setup_optimizers(self):
         """Initialize optimizers and schedulers."""
