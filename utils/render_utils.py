@@ -323,3 +323,45 @@ def generate_camera_rays_with_perturbation(
 
     rays = Rays(origins=origins, viewdirs=viewdirs)
     return rays
+
+
+def generate_camera_rays_with_warp(
+    x, y, c2w, subject, warp, mip_level: int = 0
+) -> Rays:
+    # Apply perturbation to pixel coordinates
+    if mip_level > 0:
+        x_perturbed = x.float() + warp[:, 0] * (2 ** (mip_level * (warp[:, 2] + 1) / 2))
+        y_perturbed = y.float() + warp[:, 1] * (2 ** (mip_level * (warp[:, 2] + 1) / 2))
+    else:
+        x_perturbed = x.float()
+        y_perturbed = y.float()
+
+    # Generate camera directions using perturbed coordinates
+    camera_dirs = F.pad(
+        torch.stack(
+            [
+                (x_perturbed - subject.K[0, 2] + 0.5) / subject.K[0, 0],
+                (y_perturbed - subject.K[1, 2] + 0.5)
+                / subject.K[1, 1]
+                * (-1.0 if subject.OPENGL_CAMERA else 1.0),
+            ],
+            dim=-1,
+        ),
+        (0, 1),
+        value=(-1.0 if subject.OPENGL_CAMERA else 1.0),
+    )  # [num_rays, 3]
+
+    # [n_cams, height, width, 3]
+    directions = (camera_dirs[:, None, :] * c2w[:, :3, :3]).sum(dim=-1)
+    origins = torch.broadcast_to(c2w[:, :3, -1], directions.shape)
+    viewdirs = directions / torch.linalg.norm(directions, dim=-1, keepdims=True)
+
+    if subject.training:
+        origins = torch.reshape(origins, (subject.total_rays, 3))
+        viewdirs = torch.reshape(viewdirs, (subject.total_rays, 3))
+    else:
+        origins = torch.reshape(origins, (subject.height, subject.width, 3))
+        viewdirs = torch.reshape(viewdirs, (subject.height, subject.width, 3))
+
+    rays = Rays(origins=origins, viewdirs=viewdirs)
+    return rays
