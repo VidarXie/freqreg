@@ -58,8 +58,6 @@ def render_image_with_occgrid(
     alpha_thre: float = 0.0,
     # test options
     test_chunk_size: int = 8192,
-    # only useful for dnerf
-    timestamps: Optional[torch.Tensor] = None,
 ):
     """Render the pixels of an image."""
     rays_shape = rays.origins.shape
@@ -85,16 +83,7 @@ def render_image_with_occgrid(
                 t_origins = rays_o[ray_indices]
                 t_dirs = rays_d[ray_indices]
                 positions = t_origins + t_dirs * (t_starts + t_ends)[:, None] / 2.0
-                if timestamps is not None:
-                    # dnerf
-                    t = (
-                        timestamps[ray_indices]
-                        if radiance_field.training
-                        else timestamps.expand_as(positions[:, :1])
-                    )
-                    sigmas = radiance_field.query_density(positions, t)
-                else:
-                    sigmas = radiance_field.query_density(positions)
+                sigmas = radiance_field.query_density(positions)
             return sigmas.squeeze(-1)
 
         def rgb_sigma_fn(t_starts, t_ends, ray_indices):
@@ -105,16 +94,7 @@ def render_image_with_occgrid(
                 t_origins = rays_o[ray_indices]
                 t_dirs = rays_d[ray_indices]
                 positions = t_origins + t_dirs * (t_starts + t_ends)[:, None] / 2.0
-                if timestamps is not None:
-                    # dnerf
-                    t = (
-                        timestamps[ray_indices]
-                        if radiance_field.training
-                        else timestamps.expand_as(positions[:, :1])
-                    )
-                    rgbs, sigmas = radiance_field(positions, t, t_dirs)
-                else:
-                    rgbs, sigmas = radiance_field(positions, t_dirs)
+                rgbs, sigmas = radiance_field(positions, t_dirs)
             return rgbs, sigmas.squeeze(-1)
 
         ray_indices, t_starts, t_ends = estimator.sampling(
