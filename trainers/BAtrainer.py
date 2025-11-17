@@ -37,7 +37,7 @@ class BATrainer(NeRFTrainer):
         self.se3_noise_factor = 0.02
         if config.scene in NERF_SYNTHETIC_SCENES:
             # for blender dataset
-            self.se3_noise_factor = 0.16
+            self.se3_noise_factor = 0.12
 
         super().__init__(config)
         self.start = 0.0
@@ -88,6 +88,7 @@ class BATrainer(NeRFTrainer):
             torch.randn(len(self.train_dataset), 6, device=self.device)
             * self.se3_noise_factor
         )
+        se3_noise[0] = 0.0  # Set noise for the first element to zero
         self.se3_noise_pose = LIE_.se3_to_SE3(se3_noise)
 
         # pose refinement embeddings
@@ -96,8 +97,6 @@ class BATrainer(NeRFTrainer):
             .cuda()
             .requires_grad_(True)
         )
-        # torch.nn.Embedding(len(self.train_dataset), 6).to(self.device)
-        # torch.nn.init.zeros_(self.se3_refine.weight)
 
     def _setup_optimizers(self):
         """Initialize optimizers and schedulers."""
@@ -130,6 +129,7 @@ class BATrainer(NeRFTrainer):
             self.config.training.grad_scaler_init
         )
 
+        # Pose optimizer
         self.pose_optimizer = torch.optim.AdamW([self.se3_refine], lr=0.001)
         if self.train_dataset.OPENGL_CAMERA:
             self.pose_optimizer = torch.optim.AdamW([self.se3_refine], lr=0.005)
@@ -320,6 +320,9 @@ class BATrainer(NeRFTrainer):
 
         self.pose_optimizer.step()
         self.pose_scheduler.step()
+        # Zero out the first element of the pose refinement parameter
+        with torch.no_grad():
+            self.se3_refine[0].zero_()
 
         if self.target_sample_batch_size > 0:
             # dynamic batch size for rays to keep sample batch size constant.
@@ -343,8 +346,20 @@ class BATrainer(NeRFTrainer):
             min=0.1,
         )
         with torch.no_grad():
+            # Zero out the first element noise
+            normalized_mse[0] = 0.0
+
+            # Use quasi Monte Carlo noise (Sobol sequence) instead of torch.randn_like
+            sobol_engine = torch.quasirandom.SobolEngine(
+                dimension=self.se3_refine.shape[1], scramble=True
+            )
+            sobol_noise = sobol_engine.draw(self.se3_refine.shape[0]).to(
+                self.se3_refine.device
+            )
+            # Center to zero mean and scale to [-1, 1]
+            sobol_noise = 2.0 * (sobol_noise - 0.5)
             sgld_noise = (
-                torch.randn_like(self.se3_refine)
+                sobol_noise
                 * normalized_mse[:, None]
                 * self.pose_optimizer.param_groups[0]["lr"]
             )
@@ -391,13 +406,17 @@ class BATrainer(NeRFTrainer):
             f"outlier_pct={outlier_pct:.6f}"
         )
 
+        # Log poses to Rerun, use unaligned gt poses
+        est_poses_for_rerun = self.get_pose_by_camera()
+        gt_poses_for_rerun = self.train_dataset.camtoworlds[..., :3, :4]
+
         if self.config.scene in NERF_SYNTHETIC_SCENES:
-            gt_poses = gt_poses.clone()
-            est = est.clone()
-            gt_poses[..., :3, 1:3] *= -1.0
-            est[..., :3, 1:3] *= -1.0
+            gt_poses_for_rerun = gt_poses_for_rerun.clone()
+            est_poses_for_rerun = est_poses_for_rerun.clone()
+            gt_poses_for_rerun[..., :3, 1:3] *= -1.0
+            est_poses_for_rerun[..., :3, 1:3] *= -1.0
 
         self.rerun_logger.log_poses_at_frame(
-            gt_poses, est, self.rerun_step, self.rerun_factor
+            gt_poses_for_rerun, est_poses_for_rerun, self.rerun_step, self.rerun_factor
         )
         self.rerun_step += 1

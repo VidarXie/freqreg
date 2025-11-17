@@ -61,7 +61,9 @@ class RerunLogger:
             rr.log(
                 f"{gt_cam_log_path}/{i}/frustum",
                 rr.LineStrips3D(
-                    strips=line_stips, colors=[0, 0, 255], radii=0.001 * factor
+                    strips=line_stips,
+                    colors=[0, 0, 255] if i > 0 else [0, 255, 0],
+                    radii=0.001 * factor if i > 0 else 0.002 * factor,
                 ),
             )
 
@@ -97,7 +99,9 @@ class RerunLogger:
             rr.log(
                 f"{pred_cam_log_path}/{i}/frustum",
                 rr.LineStrips3D(
-                    strips=line_stips, colors=[255, 0, 0], radii=0.001 * factor
+                    strips=line_stips,
+                    colors=[255, 0, 0] if i > 0 else [0, 255, 0],
+                    radii=0.001 * factor if i > 0 else 0.002 * factor,
                 ),
             )
 

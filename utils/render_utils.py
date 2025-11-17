@@ -11,6 +11,7 @@ from datasets.utils import Rays, namedtuple_map
 import torch.nn.functional as F
 
 from nerfacc.estimators.occ_grid import OccGridEstimator
+from torch.quasirandom import SobolEngine
 from nerfacc.volrend import (
     rendering,
 )
@@ -187,10 +188,14 @@ def generate_camera_rays_with_perturbation(
 
     # Apply perturbation to pixel coordinates
     if perturbation_std > 0:
-        x_noise = torch.randn_like(x.float()) * perturbation_std
-        y_noise = torch.randn_like(y.float()) * perturbation_std
-        x_perturbed = x.float() + x_noise
-        y_perturbed = y.float() + y_noise
+        # Use Sobol sequence for quasi-Monte Carlo sampling
+        num_rays = x.numel()
+        sobol = SobolEngine(dimension=2, scramble=True)
+        qmc_samples = sobol.draw(num_rays).to(x.device)
+        x_noise = (qmc_samples[:, 0] - 0.5) * perturbation_std
+        y_noise = (qmc_samples[:, 1] - 0.5) * perturbation_std
+        x_perturbed = x.float() + x_noise.view(x.shape)
+        y_perturbed = y.float() + y_noise.view(y.shape)
     else:
         x_perturbed = x.float()
         y_perturbed = y.float()
