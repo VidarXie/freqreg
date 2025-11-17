@@ -29,6 +29,7 @@ def create_config_from_args(args) -> NeRFConfig:
         test_chunk_size=args.test_chunk_size,
         device=args.device,
         seed=args.seed,
+        noise_std=args.noise_std,
     )
 
     # Override training parameters if specified
@@ -60,6 +61,7 @@ def main():
     parser.add_argument(
         "--task", type=str, default="ba", choices=["ba", "fs", "nerf"], help="Task type"
     )
+    parser.add_argument("--noise_std", type=float, help="Noise standard deviation")
 
     # Optional training arguments
     parser.add_argument(

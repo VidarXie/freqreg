@@ -73,6 +73,9 @@ class NeRFConfig:
     scene_config: Optional[SceneConfig] = None
     model: Optional[ModelConfig] = None
 
+    # BA options
+    noise_std: Optional[float] = None
+
     def __post_init__(self):
         """Auto-configure based on scene type if not provided."""
         if self.training is None or self.scene_config is None or self.model is None:

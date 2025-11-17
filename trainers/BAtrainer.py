@@ -34,10 +34,10 @@ class BATrainer(NeRFTrainer):
     """
 
     def __init__(self, config: NeRFConfig):
-        self.se3_noise_factor = 0.02
-        if config.scene in NERF_SYNTHETIC_SCENES:
-            # for blender dataset
-            self.se3_noise_factor = 0.12
+        assert config.noise_std is not None, (
+            "noise_std must be specified for BA trainer"
+        )
+        self.se3_noise_factor = config.noise_std
 
         super().__init__(config)
         self.start = 0.0
