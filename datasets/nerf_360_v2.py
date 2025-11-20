@@ -7,10 +7,8 @@ import os
 import imageio
 import numpy as np
 import torch
-import torch.nn.functional as F
 import tqdm
 
-from datasets.utils import Rays
 from external.pycolmap.pycolmap.scene_manager import SceneManager
 
 
@@ -202,6 +200,7 @@ class SubjectLoader(torch.utils.data.Dataset):
         "stump",
         "treehill",
         "flowers",
+        "artfield_colmap",
     ]
 
     OPENGL_CAMERA = False
@@ -261,31 +260,9 @@ class SubjectLoader(torch.utils.data.Dataset):
 
     @torch.no_grad()
     def __getitem__(self, index):
-        data = self.fetch_data_new(index)
-        data = self.preprocess_new(data)
+        data = self.fetch_data(index)
+        data = self.preprocess(data)
         return data
-
-    def preprocess(self, data):
-        """Process the fetched / cached data with randomness."""
-        pixels, rays = data["rgb"], data["rays"]
-
-        if self.training:
-            if self.color_bkgd_aug == "random":
-                color_bkgd = torch.rand(3, device=self.images.device, generator=self.g)
-            elif self.color_bkgd_aug == "white":
-                color_bkgd = torch.ones(3, device=self.images.device)
-            elif self.color_bkgd_aug == "black":
-                color_bkgd = torch.zeros(3, device=self.images.device)
-        else:
-            # just use white during inference
-            color_bkgd = torch.ones(3, device=self.images.device)
-
-        return {
-            "pixels": pixels,  # [n_rays, 3] or [h, w, 3]
-            "rays": rays,  # [n_rays,] or [h, w]
-            "color_bkgd": color_bkgd,  # [3,]
-            **{k: v for k, v in data.items() if k not in ["rgb", "rays"]},
-        }
 
     def update_num_rays(self, num_rays):
         self.num_rays = num_rays
@@ -294,81 +271,7 @@ class SubjectLoader(torch.utils.data.Dataset):
 
     def fetch_data(self, index):
         """Fetch the data (it maybe cached for multiple batches)."""
-        num_rays = self.num_rays
-
-        if self.training:
-            image_id = torch.randint(
-                0,
-                len(self.images),
-                size=(num_rays,),
-                device=self.images.device,
-                generator=self.g,
-            )
-            x = torch.randint(
-                0,
-                self.width,
-                size=(num_rays,),
-                device=self.images.device,
-                generator=self.g,
-            )
-            y = torch.randint(
-                0,
-                self.height,
-                size=(num_rays,),
-                device=self.images.device,
-                generator=self.g,
-            )
-        else:
-            image_id = [index]
-            x, y = torch.meshgrid(
-                torch.arange(self.width, device=self.images.device),
-                torch.arange(self.height, device=self.images.device),
-                indexing="xy",
-            )
-            x = x.flatten()
-            y = y.flatten()
-
-        # generate rays
-        rgb = self.images[image_id, y, x] / 255.0  # (num_rays, 3)
-        c2w = self.camtoworlds[image_id]  # (num_rays, 3, 4)
-        camera_dirs = F.pad(
-            torch.stack(
-                [
-                    (x - self.K[0, 2] + 0.5) / self.K[0, 0],
-                    (y - self.K[1, 2] + 0.5)
-                    / self.K[1, 1]
-                    * (-1.0 if self.OPENGL_CAMERA else 1.0),
-                ],
-                dim=-1,
-            ),
-            (0, 1),
-            value=(-1.0 if self.OPENGL_CAMERA else 1.0),
-        )  # [num_rays, 3]
-
-        # [num_rays, 3]
-        directions = (camera_dirs[:, None, :] * c2w[:, :3, :3]).sum(dim=-1)
-        origins = torch.broadcast_to(c2w[:, :3, -1], directions.shape)
-        viewdirs = directions / torch.linalg.norm(directions, dim=-1, keepdims=True)
-
-        if self.training:
-            origins = torch.reshape(origins, (num_rays, 3))
-            viewdirs = torch.reshape(viewdirs, (num_rays, 3))
-            rgb = torch.reshape(rgb, (num_rays, 3))
-        else:
-            origins = torch.reshape(origins, (self.height, self.width, 3))
-            viewdirs = torch.reshape(viewdirs, (self.height, self.width, 3))
-            rgb = torch.reshape(rgb, (self.height, self.width, 3))
-
-        rays = Rays(origins=origins, viewdirs=viewdirs)
-
-        return {
-            "rgb": rgb,  # [h, w, 3] or [num_rays, 3]
-            "rays": rays,  # [h, w, 3] or [num_rays, 3]
-        }
-
-    def fetch_data_new(self, index):
-        """Fetch the data (it maybe cached for multiple batches)."""
-        if self.training:
+        if index < 0:
             image_id = torch.repeat_interleave(
                 torch.arange(len(self.images), device=self.images.device),
                 self.rays_per_image,
@@ -414,7 +317,7 @@ class SubjectLoader(torch.utils.data.Dataset):
             "c2w": c2w,
         }
 
-    def preprocess_new(self, data):
+    def preprocess(self, data):
         """Process the fetched / cached data with randomness."""
         pixels = data["rgb"]
         c2w = data["c2w"]

@@ -36,6 +36,7 @@ MIPNERF360_UNBOUNDED_SCENES = [
     "stump",
     "flowers",
     "treehill",
+    "artfield_colmap",
 ]
 
 

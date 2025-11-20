@@ -285,8 +285,7 @@ class BATrainer(NeRFTrainer):
         target_level = self.init_level * alpha
 
         # Sample training data
-        i = torch.randint(0, len(self.train_dataset), (1,)).item()
-        data = self.train_dataset[i]
+        data = self.train_dataset[-1]
 
         render_bkgd = data["color_bkgd"]
         pixels = data["pixels"]
