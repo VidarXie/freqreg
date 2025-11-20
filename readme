@@ -1,6 +1,6 @@
 To run: 
 
-python main.py --scene lego --data_root data/nerf_synthetic --exp_name test
+python main.py --scene start --data_root data --exp_name test
 
 or
  

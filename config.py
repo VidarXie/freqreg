@@ -94,8 +94,8 @@ class NeRFConfig:
             aabb=[-1.0, -1.0, -1.0, 1.0, 1.0, 1.0],
             near_plane=0.2,
             far_plane=1e3,
-            train_dataset_kwargs={"color_bkgd_aug": "random", "factor": 4},
-            test_dataset_kwargs={"factor": 4},
+            train_dataset_kwargs={"color_bkgd_aug": "random", "factor": 1},
+            test_dataset_kwargs={"factor": 1},
         )
 
         self.model = ModelConfig(

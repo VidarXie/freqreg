@@ -100,10 +100,10 @@ class SceneManager:
         self.cameras = OrderedDict()
 
         with open(input_file, "rb") as f:
-            num_cameras = struct.unpack("L", f.read(8))[0]
+            num_cameras = struct.unpack("Q", f.read(8))[0]
 
             for _ in range(num_cameras):
-                camera_id, camera_type, w, h = struct.unpack("IiLL", f.read(24))
+                camera_id, camera_type, w, h = struct.unpack("IiQQ", f.read(24))
                 num_params = Camera.GetNumParams(camera_type)
                 params = struct.unpack("d" * num_params, f.read(8 * num_params))
                 self.cameras[camera_id] = Camera(camera_type, w, h, params)
@@ -142,7 +142,7 @@ class SceneManager:
         self.images = OrderedDict()
 
         with open(input_file, "rb") as f:
-            num_images = struct.unpack("L", f.read(8))[0]
+            num_images = struct.unpack("Q", f.read(8))[0]
             image_struct = struct.Struct("<I 4d 3d I")
             for _ in range(num_images):
                 data = image_struct.unpack(f.read(image_struct.size))
@@ -235,7 +235,7 @@ class SceneManager:
 
     def _load_points3D_bin(self, input_file):
         with open(input_file, "rb") as f:
-            num_points3D = struct.unpack("L", f.read(8))[0]
+            num_points3D = struct.unpack("Q", f.read(8))[0]
 
             self.points3D = np.empty((num_points3D, 3))
             self.point3D_ids = np.empty(num_points3D, dtype=np.uint64)
@@ -319,9 +319,9 @@ class SceneManager:
 
     def _save_cameras_bin(self, output_file):
         with open(output_file, "wb") as fid:
-            fid.write(struct.pack("L", len(self.cameras)))
+            fid.write(struct.pack("Q", len(self.cameras)))
 
-            camera_struct = struct.Struct("IiLL")
+            camera_struct = struct.Struct("IiQQ")
 
             for camera_id, camera in sorted(self.cameras.iteritems()):
                 fid.write(
@@ -359,7 +359,7 @@ class SceneManager:
 
     def _save_images_bin(self, output_file):
         with open(output_file, "wb") as fid:
-            fid.write(struct.pack("L", len(self.images)))
+            fid.write(struct.pack("Q", len(self.images)))
 
             for image_id, image in self.images.iteritems():
                 fid.write(struct.pack("I", image_id))
@@ -367,7 +367,7 @@ class SceneManager:
                 fid.write(image.tvec.tobytes())
                 fid.write(struct.pack("I", image.camera_id))
                 fid.write(image.name + "\0")
-                fid.write(struct.pack("L", len(image.points2D)))
+                fid.write(struct.pack("Q", len(image.points2D)))
                 data = np.rec.fromarrays(
                     (image.points2D[:, 0], image.points2D[:, 1], image.point3D_ids)
                 )
@@ -437,17 +437,17 @@ class SceneManager:
         iter_point3D_id_to_point3D_idx = self.point3D_id_to_point3D_idx.iteritems()
 
         with open(output_file, "wb") as fid:
-            fid.write(struct.pack("L", num_valid_points3D))
+            fid.write(struct.pack("Q", num_valid_points3D))
 
             for point3D_id, point3D_idx in iter_point3D_id_to_point3D_idx:
                 if point3D_idx == SceneManager.INVALID_POINT3D:
                     continue
 
-                fid.write(struct.pack("L", point3D_id))
+                fid.write(struct.pack("Q", point3D_id))
                 fid.write(self.points3D[point3D_idx].tobytes())
                 fid.write(self.point3D_colors[point3D_idx].tobytes())
                 fid.write(self.point3D_errors[point3D_idx].tobytes())
-                fid.write(struct.pack("L", len(self.point3D_id_to_images[point3D_id])))
+                fid.write(struct.pack("Q", len(self.point3D_id_to_images[point3D_id])))
                 fid.write(self.point3D_id_to_images[point3D_id].tobytes())
 
     def _save_points3D_txt(self, output_file):

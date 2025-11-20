@@ -202,6 +202,7 @@ class SubjectLoader(torch.utils.data.Dataset):
         "stump",
         "treehill",
         "flowers",
+        "output"
     ]
 
     OPENGL_CAMERA = False
@@ -398,7 +399,7 @@ class SubjectLoader(torch.utils.data.Dataset):
             y = y.flatten()
 
         # generate rays
-        rgb = self.images[image_id, y, x] / 255.0  # (num_rays, 3)
+        rgb = self.images[:,:,:,:3][image_id, y, x] / 255.0  # (num_rays, 3)
         c2w = self.camtoworlds[image_id]  # (num_rays, 3, 4)
 
         if self.training:

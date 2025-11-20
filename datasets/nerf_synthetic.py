@@ -59,6 +59,7 @@ class SubjectLoader(torch.utils.data.Dataset):
         "materials",
         "mic",
         "ship",
+        "start"
     ]
 
     width, height = 800, 800

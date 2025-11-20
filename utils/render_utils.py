@@ -31,6 +31,7 @@ NERF_SYNTHETIC_SCENES = [
     "materials",
     "mic",
     "ship",
+    "start"
 ]
 MIPNERF360_UNBOUNDED_SCENES = [
     "garden",
@@ -42,6 +43,7 @@ MIPNERF360_UNBOUNDED_SCENES = [
     "stump",
     "flowers",
     "treehill",
+    "output"
 ]
 
 
