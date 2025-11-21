@@ -156,7 +156,7 @@ class NeRFTrainer:
         y = data["y"]
 
         # Generate rays
-        rays = generate_camera_rays(x, y, c2w, self.train_dataset)
+        rays = generate_camera_rays(x, y, c2w, self.train_dataset, training=True)
 
         # update occupancy grid
         self.estimator.update_every_n_steps(

@@ -62,6 +62,7 @@ class NeRFConfig:
     data_root: str
     exp_name: str
     task: str = "ba"  # Options: ba, fs
+    max_steps: int = 20000
     train_split: str = "train"
     test_chunk_size: int = 8192
     target_sample_batch_size: int = 1 << 18
@@ -93,7 +94,7 @@ class NeRFConfig:
     def _configure_mipnerf360(self):
         """Configure for MipNeRF360 scenes."""
         self.training = TrainingConfig(
-            max_steps=100000, init_batch_size=8192, weight_decay=0.0
+            max_steps=self.max_steps, init_batch_size=8192, weight_decay=0.0
         )
 
         self.scene_config = SceneConfig(
@@ -119,7 +120,7 @@ class NeRFConfig:
         weight_decay = 1e-5 if self.scene in ["materials", "ficus", "drums"] else 1e-6
 
         self.training = TrainingConfig(
-            max_steps=20000, init_batch_size=8192, weight_decay=weight_decay
+            max_steps=self.max_steps, init_batch_size=8192, weight_decay=weight_decay
         )
 
         self.scene_config = SceneConfig(

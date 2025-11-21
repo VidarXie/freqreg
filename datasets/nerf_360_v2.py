@@ -90,7 +90,8 @@ def _load_colmap(root_fp: str, subject_id: str, factor: int = 1):
         params["k3"] = cam.k3
         params["k4"] = cam.k4
 
-    assert params is None, "Only support pinhole camera model."
+    # assert params is None, "Only support pinhole camera model."
+    print("camera type:", type_, "distortion params:", params)
 
     # Previous Nerf results were generated with images sorted by filename,
     # ensure metrics are reported on the same test set.
@@ -200,7 +201,6 @@ class SubjectLoader(torch.utils.data.Dataset):
         "stump",
         "treehill",
         "flowers",
-        "artfield_colmap",
     ]
 
     OPENGL_CAMERA = False
@@ -304,10 +304,16 @@ class SubjectLoader(torch.utils.data.Dataset):
         rgb = self.images[image_id, y, x] / 255.0  # (num_rays, 3)
         c2w = self.camtoworlds[image_id]  # (num_rays, 3, 4)
 
-        if self.training:
-            rgb = torch.reshape(rgb, (self.total_rays, 3))
+        if index < 0:
+            if rgb.shape[-1] == 4:
+                rgb = torch.reshape(rgb, (self.total_rays, 4))
+            else:
+                rgb = torch.reshape(rgb, (self.total_rays, 3))
         else:
-            rgb = torch.reshape(rgb, (self.height, self.width, 3))
+            if rgb.shape[-1] == 4:
+                rgb = torch.reshape(rgb, (self.height, self.width, 4))
+            else:
+                rgb = torch.reshape(rgb, (self.height, self.width, 3))
 
         return {
             "image_id": image_id,
@@ -319,7 +325,13 @@ class SubjectLoader(torch.utils.data.Dataset):
 
     def preprocess(self, data):
         """Process the fetched / cached data with randomness."""
-        pixels = data["rgb"]
+        raw_rgb = data["rgb"]
+        pixels, alpha = None, None
+        if raw_rgb.shape[-1] == 4:
+            pixels, alpha = torch.split(raw_rgb, [3, 1], dim=-1)
+        else:
+            pixels = raw_rgb
+
         c2w = data["c2w"]
         image_id = data["image_id"]
         x = data["x"]
@@ -335,6 +347,9 @@ class SubjectLoader(torch.utils.data.Dataset):
         else:
             # just use white during inference
             color_bkgd = torch.ones(3, device=self.images.device)
+
+        if alpha is not None:
+            pixels = pixels * alpha + color_bkgd * (1.0 - alpha)
 
         return {
             "pixels": pixels,  # [n_rays, 3] or [h, w, 3]

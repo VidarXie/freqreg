@@ -82,6 +82,11 @@ class NeRFPipeline:
 
                     if verbose:
                         self.evaluator.print_evaluation_results(eval_results)
+        
+        # BA relocalization 
+        if self.config.task == "ba":
+            print("Running BA relocalization...")
+            self.trainer.relocalize_poses()
 
         # Final evaluation
         print("Training completed. Running final evaluation...")

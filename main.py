@@ -25,6 +25,7 @@ def create_config_from_args(args) -> NeRFConfig:
         data_root=args.data_root,
         exp_name=args.exp_name,
         task=args.task,
+        max_steps=args.max_steps,
         train_split=args.train_split,
         test_chunk_size=args.test_chunk_size,
         device=args.device,

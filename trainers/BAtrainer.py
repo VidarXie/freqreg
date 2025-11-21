@@ -10,10 +10,12 @@ import math
 
 import torch
 import torch.nn.functional as F
+import tqdm
 
 from config import NeRFConfig
 from utils.render_utils import (
     render_image_with_occgrid,
+    generate_camera_rays,
     generate_camera_rays_with_perturbation,
     generate_camera_rays_with_warp,
 )
@@ -91,7 +93,9 @@ class BATrainer(NeRFTrainer):
             torch.randn(len(self.train_dataset), 6, device=self.device)
             * self.se3_noise_factor
         )
+        # Fix anchor frame to avoid gauge freedom; fix another frame to fix the scale as well
         se3_noise[0] = 0.0  # Set noise for the first element to zero
+        se3_noise[-1] = 0.0  # Set noise for the last element to zero
         self.se3_noise_pose = LIE_.se3_to_SE3(se3_noise)
 
         # pose refinement embeddings
@@ -351,9 +355,10 @@ class BATrainer(NeRFTrainer):
 
         self.pose_optimizer.step()
         self.pose_scheduler.step()
-        # Zero out the first element of the pose refinement parameter
+        # Zero out the first and last element of the pose refinement parameter
         with torch.no_grad():
             self.se3_refine[0].zero_()
+            self.se3_refine[-1].zero_()
 
         self.warp_optimizer.step()
         self.warp_scheduler.step()
@@ -388,8 +393,9 @@ class BATrainer(NeRFTrainer):
             min=1e-2,
         )
         with torch.no_grad():
-            # Zero out the first element noise
+            # Zero out the first and last element noise
             normalized_mle[0] = 0.0
+            normalized_mle[-1] = 0.0
 
             # Use quasi Monte Carlo noise (Sobol sequence) instead of torch.randn_like
             sobol_engine = torch.quasirandom.SobolEngine(
@@ -482,3 +488,57 @@ class BATrainer(NeRFTrainer):
             gt_poses_for_rerun, est_poses_for_rerun, self.rerun_step, self.rerun_factor
         )
         self.rerun_step += 1
+
+    def relocalize_poses(self):
+        # 1. Identify outlier poses
+        iterator = tqdm.tqdm(range(len(self.train_dataset)), desc="Identify outliers")
+        training_mse = []
+        with torch.no_grad():
+            align_R0, align_s, align_t = self.get_pose_align()
+            for i in iterator:
+                data = self.train_dataset[i]
+
+                render_bkgd = data["color_bkgd"]
+                pixels = data["pixels"]
+
+                c2w = data["c2w"]
+                c2w_R = torch.einsum("ij,njk->nik", align_R0.t(), c2w[..., :3, :3])
+                c2w_t = (c2w[..., :3, 3] - align_t) / align_s @ align_R0
+                c2w_aligned = torch.cat([c2w_R, c2w_t[..., None]], dim=-1)
+                x = data["x"]
+                y = data["y"]
+
+                # Generate rays
+                rays = generate_camera_rays(x, y, c2w_aligned, self.train_dataset)
+
+                # Render image
+                rgb, acc, depth, n_rendering_samples = render_image_with_occgrid(
+                    self.radiance_field,
+                    self.estimator,
+                    rays,
+                    # rendering options
+                    near_plane=self.config.scene_config.near_plane,
+                    render_step_size=self.render_step_size,
+                    render_bkgd=render_bkgd,
+                    cone_angle=0.004,
+                    alpha_thre=0.01,
+                )
+
+                # Compute metrics
+                mse = F.mse_loss(rgb, pixels)
+                training_mse.append(mse.item())
+
+        # Identify outliers in training_mse using IQR rule (aggressive upper fence)
+        mse_tensor = torch.tensor(training_mse, device=self.device)
+        q1 = torch.quantile(mse_tensor, 0.25)
+        q3 = torch.quantile(mse_tensor, 0.75)
+        iqr = q3 - q1
+        upper_fence = q3 + 3.0 * iqr
+
+        outlier_mask = mse_tensor > upper_fence
+        outlier_indices = outlier_mask.nonzero(as_tuple=True)[0].cpu().tolist()
+
+        if outlier_indices:
+            print("Outlier indices:", outlier_indices)
+
+        return outlier_indices

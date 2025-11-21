@@ -36,7 +36,6 @@ MIPNERF360_UNBOUNDED_SCENES = [
     "stump",
     "flowers",
     "treehill",
-    "artfield_colmap",
 ]
 
 
@@ -226,7 +225,7 @@ def render_image_with_occgrid_noise(
     )
 
 
-def generate_camera_rays(x, y, c2w, subject) -> Rays:
+def generate_camera_rays(x, y, c2w, subject, training=False) -> Rays:
     camera_dirs = F.pad(
         torch.stack(
             [
@@ -246,7 +245,7 @@ def generate_camera_rays(x, y, c2w, subject) -> Rays:
     origins = torch.broadcast_to(c2w[:, :3, -1], directions.shape)
     viewdirs = directions / torch.linalg.norm(directions, dim=-1, keepdims=True)
 
-    if subject.training:
+    if training:
         origins = torch.reshape(origins, (subject.total_rays, 3))
         viewdirs = torch.reshape(viewdirs, (subject.total_rays, 3))
     else:

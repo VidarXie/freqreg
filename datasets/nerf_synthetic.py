@@ -170,7 +170,7 @@ class SubjectLoader(torch.utils.data.Dataset):
         rgb = self.images[image_id, y, x] / 255.0  # (num_rays, 3)
         c2w = self.camtoworlds[image_id]  # (num_rays, 3, 4)
 
-        if self.training:
+        if index < 0:
             rgba = torch.reshape(rgb, (self.total_rays, 4))
         else:
             rgba = torch.reshape(rgb, (self.height, self.width, 4))
