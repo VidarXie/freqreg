@@ -16,6 +16,8 @@ from trainers.trainer import NeRFTrainer
 from trainers.BAevaluator import BAEvaluator
 from trainers.evaluator import NeRFEvaluator
 
+from trainers.sampler import NeRFSampler
+
 
 class NeRFPipeline:
     """
@@ -31,6 +33,8 @@ class NeRFPipeline:
         """
         self.config = config
 
+        self.sampler = None
+
         # Initialize trainer and evaluator
         if self.config.task == "ba":
             self.trainer = BATrainer(config)
@@ -41,6 +45,7 @@ class NeRFPipeline:
         elif self.config.task == "nerf":
             self.trainer = NeRFTrainer(config)
             self.evaluator = NeRFEvaluator(self.trainer, save_images=True)
+            self.sampler = NeRFSampler(self.trainer)
 
         # Training history
         self.training_history = []
@@ -82,11 +87,6 @@ class NeRFPipeline:
 
                     if verbose:
                         self.evaluator.print_evaluation_results(eval_results)
-        
-        # BA relocalization 
-        if self.config.task == "ba":
-            print("Running BA relocalization...")
-            self.trainer.relocalize_poses()
 
         # Final evaluation
         print("Training completed. Running final evaluation...")
@@ -97,6 +97,11 @@ class NeRFPipeline:
         if verbose:
             print("\nFinal Results:")
             self.evaluator.print_evaluation_results(final_eval)
+
+        if self.sampler is not None:
+            print("Running mc sampling experiment...")
+            index = torch.randint(0, len(self.trainer.test_dataset), (1,)).item()
+            self.sampler.sampling(index)
 
         return {
             "final_evaluation": final_eval,

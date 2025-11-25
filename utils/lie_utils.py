@@ -1,5 +1,4 @@
 import torch
-import numpy as np
 
 
 class Lie:
@@ -16,18 +15,6 @@ class Lie:
         R = I + A * wx + B * wx @ wx
         return R
 
-    def SO3_to_so3(self, R, eps=1e-7):  # [...,3,3]
-        trace = R[..., 0, 0] + R[..., 1, 1] + R[..., 2, 2]
-        theta = ((trace - 1) / 2).clamp(-1 + eps, 1 - eps).acos_()[
-            ..., None, None
-        ] % np.pi  # ln(R) will explode if theta==pi
-        lnR = (
-            1 / (2 * self.taylor_A(theta) + 1e-8) * (R - R.transpose(-2, -1))
-        )  # FIXME: wei-chiu finds it weird
-        w0, w1, w2 = lnR[..., 2, 1], lnR[..., 0, 2], lnR[..., 1, 0]
-        w = torch.stack([w0, w1, w2], dim=-1)
-        return w
-
     def se3_to_SE3(self, wu):  # [...,3]
         w, u = wu.split([3, 3], dim=-1)
         wx = self.skew_symmetric(w)
@@ -40,19 +27,6 @@ class Lie:
         V = I + B * wx + C * wx @ wx
         Rt = torch.cat([R, (V @ u[..., None])], dim=-1)
         return Rt
-
-    def SE3_to_se3(self, Rt, eps=1e-8):  # [...,3,4]
-        R, t = Rt.split([3, 1], dim=-1)
-        w = self.SO3_to_so3(R)
-        wx = self.skew_symmetric(w)
-        theta = w.norm(dim=-1)[..., None, None]
-        I = torch.eye(3, device=w.device, dtype=torch.float32)  # noqa: E741
-        A = self.taylor_A(theta)
-        B = self.taylor_B(theta)
-        invV = I - 0.5 * wx + (1 - A / (2 * B)) / (theta**2 + eps) * wx @ wx
-        u = (invV @ t)[..., 0]
-        wu = torch.cat([w, u], dim=-1)
-        return wu
 
     def skew_symmetric(self, w):
         w0, w1, w2 = w.unbind(dim=-1)

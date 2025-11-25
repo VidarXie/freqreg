@@ -28,7 +28,7 @@ class TrainingConfig:
         if self.print_every is None:
             self.print_every = self.max_steps // 100
         if self.eval_every is None:
-            self.eval_every = self.max_steps // 5
+            self.eval_every = self.max_steps // 2
 
 
 @dataclass

@@ -69,7 +69,7 @@ class Pose:
         bottom_row = bottom_row.expand(*batch_shape, 1, 4)
 
         # Concatenate to get 4x4 matrix
-        
+
         return torch.cat([pose, bottom_row], dim=-2)
 
     def from_matrix(self, matrix):
@@ -87,23 +87,35 @@ class Pose:
 
 POSE_ = Pose()
 
+
 def sim3_align_errors(gt, est):
-    X = est[:, :, 3]; Y = gt[:, :, 3]
+    X = est[:, :, 3]
+    Y = gt[:, :, 3]
     muX, muY = X.mean(0), Y.mean(0)
     Xc, Yc = X - muX, Y - muY
     U, S, Vh = torch.linalg.svd((Yc.t() @ Xc) / X.shape[0])
-    sgn = torch.where(torch.det(U @ Vh) < 0, -torch.ones((), device=gt.device, dtype=gt.dtype), torch.ones((), device=gt.device, dtype=gt.dtype))
-    d = torch.stack([torch.ones((), device=gt.device, dtype=gt.dtype), torch.ones((), device=gt.device, dtype=gt.dtype), sgn])
+    sgn = torch.where(
+        torch.det(U @ Vh) < 0,
+        -torch.ones((), device=gt.device, dtype=gt.dtype),
+        torch.ones((), device=gt.device, dtype=gt.dtype),
+    )
+    d = torch.stack(
+        [
+            torch.ones((), device=gt.device, dtype=gt.dtype),
+            torch.ones((), device=gt.device, dtype=gt.dtype),
+            sgn,
+        ]
+    )
     R0 = U @ torch.diag(d) @ Vh
     s = (S * d).sum() / (Xc.pow(2).sum() / X.shape[0])
     t = muY - s * (R0 @ muX)
-    Ra = torch.einsum('ij,njk->nik', R0, est[:, :, :3])
+    Ra = torch.einsum("ij,njk->nik", R0, est[:, :, :3])
     ta = s * (X @ R0.t()) + t
     out = est.clone()
     out[:, :, :3] = Ra
     out[:, :, 3] = ta
     te = torch.linalg.norm(ta - Y, dim=1)
-    Rerr = torch.einsum('nij,njk->nik', gt[:, :, :3].transpose(1,2), Ra)
+    Rerr = torch.einsum("nij,njk->nik", gt[:, :, :3].transpose(1, 2), Ra)
     tr = Rerr.diagonal(dim1=1, dim2=2).sum(1)
     re = torch.arccos(((tr - 1.0) * 0.5).clamp(-1.0, 1.0)) * (180.0 / torch.pi)
     return out, te, re, R0, s, t

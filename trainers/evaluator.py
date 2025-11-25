@@ -63,6 +63,8 @@ class NeRFEvaluator:
 
         with torch.no_grad():
             for i in iterator:
+                if i > 5:
+                    continue  # DEBUG mode limit to 5 images
                 data = self.trainer.test_dataset[i]
 
                 """
