@@ -100,8 +100,10 @@ class NeRFPipeline:
 
         if self.sampler is not None:
             print("Running mc sampling experiment...")
-            index = torch.randint(0, len(self.trainer.test_dataset), (1,)).item()
-            self.sampler.sampling(index)
+            perm = torch.randperm(len(self.trainer.test_dataset))
+            indices = perm[:25]
+            for idx in indices:
+                self.sampler.sampling(idx)
 
         return {
             "final_evaluation": final_eval,

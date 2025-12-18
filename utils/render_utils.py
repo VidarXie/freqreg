@@ -325,6 +325,68 @@ def generate_camera_rays_with_perturbation(
     return rays
 
 
+def generate_camera_rays_with_perturbation_sampling(
+    x, y, c2w, subject, mip_level: int = 0, sampling_level=1
+) -> Rays:
+    # Calculate perturbation std based on mipmap level
+    # For mip_level <= 0, no perturbation (perturbation_std = 0)
+    # For mip_level > 0, perturbation scales with 2^mip_level
+    if mip_level <= 0:
+        perturbation_std = 0.0
+    else:
+        perturbation_std = 2.0**mip_level
+
+    # Apply perturbation to pixel coordinates
+    if perturbation_std > 0:
+        # Use Sobol sequence for quasi-Monte Carlo sampling
+        num_rays = x.numel()
+        sobol = SobolEngine(dimension=2, scramble=True)
+        qmc_samples = sobol.draw(num_rays).to(x.device)
+        x_noise = (qmc_samples[:, 0] - 0.5) * perturbation_std
+        y_noise = (qmc_samples[:, 1] - 0.5) * perturbation_std
+        x_perturbed = x.float() + x_noise.view(x.shape)
+        y_perturbed = y.float() + y_noise.view(y.shape)
+    else:
+        x_perturbed = x.float()
+        y_perturbed = y.float()
+
+    # Generate camera directions using perturbed coordinates
+    camera_dirs = F.pad(
+        torch.stack(
+            [
+                (x_perturbed - subject.K[0, 2] + 0.5) / subject.K[0, 0],
+                (y_perturbed - subject.K[1, 2] + 0.5)
+                / subject.K[1, 1]
+                * (-1.0 if subject.OPENGL_CAMERA else 1.0),
+            ],
+            dim=-1,
+        ),
+        (0, 1),
+        value=(-1.0 if subject.OPENGL_CAMERA else 1.0),
+    )  # [num_rays, 3]
+
+    # [n_cams, height, width, 3]
+    directions = (camera_dirs[:, None, :] * c2w[:, :3, :3]).sum(dim=-1)
+    origins = torch.broadcast_to(c2w[:, :3, -1], directions.shape)
+    viewdirs = directions / torch.linalg.norm(directions, dim=-1, keepdims=True)
+
+    if subject.training:
+        origins = torch.reshape(origins, (subject.total_rays, 3))
+        viewdirs = torch.reshape(viewdirs, (subject.total_rays, 3))
+    else:
+        origins = torch.reshape(
+            origins,
+            (subject.height // sampling_level, subject.width // sampling_level, 3),
+        )
+        viewdirs = torch.reshape(
+            viewdirs,
+            (subject.height // sampling_level, subject.width // sampling_level, 3),
+        )
+
+    rays = Rays(origins=origins, viewdirs=viewdirs)
+    return rays
+
+
 def generate_camera_rays_with_warp(
     x, y, c2w, subject, warp, mip_level: int = 0
 ) -> Rays:

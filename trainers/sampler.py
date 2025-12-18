@@ -1,9 +1,12 @@
+import os
+from pathlib import Path
+import json
 import torch
 import torch.nn.functional as F
 import tqdm
 from trainers.trainer import NeRFTrainer
 from utils.render_utils import (
-    generate_camera_rays_with_perturbation,
+    generate_camera_rays_with_perturbation_sampling,
     render_image_with_occgrid,
 )
 
@@ -13,7 +16,7 @@ from utils.pose_utils import POSE_
 
 class NeRFSampler:
     def __init__(self, trainer: NeRFTrainer):
-        self.se3_noise_factor = 0.15
+        self.se3_noise_factor = 0.3
         self.trainer = trainer
         self.config = trainer.config
         self.max_steps = 100
@@ -24,6 +27,8 @@ class NeRFSampler:
         self.device = self.trainer.device
 
         self.base_pose = None
+
+        self.output_dir = self.config.output_dir
 
     def _setup_pertubation(self):
         se3_noise = (
@@ -49,18 +54,30 @@ class NeRFSampler:
         return c2w_i
 
     def _energy_likelihood(self, xi, data, current_level):
+        sample_lvl = 4
         render_bkgd = data["color_bkgd"]
-        pixels = data["pixels"]
+        pixels = data["pixels"][::sample_lvl, ::sample_lvl, :]
 
-        x = data["x"]
-        y = data["y"]
+        x = data["x"].view(
+            self.trainer.test_dataset.height, self.trainer.test_dataset.width
+        )
+        x = x[::sample_lvl, ::sample_lvl].flatten()
+        y = data["y"].view(
+            self.trainer.test_dataset.height, self.trainer.test_dataset.width
+        )
+        y = y[::sample_lvl, ::sample_lvl].flatten()
 
         c2w_i = self._pose_from_twist(xi)
 
         with torch.no_grad():
             # Generate rays
-            rays = generate_camera_rays_with_perturbation(
-                x, y, c2w_i, self.trainer.test_dataset, mip_level=current_level
+            rays = generate_camera_rays_with_perturbation_sampling(
+                x,
+                y,
+                c2w_i,
+                self.trainer.test_dataset,
+                mip_level=current_level,
+                sampling_level=sample_lvl,
             )
 
             # Render image
@@ -87,7 +104,7 @@ class NeRFSampler:
             mse_loss = F.mse_loss(rgb, pixels)
             psnr = -10.0 * torch.log(mse_loss) / torch.log(torch.tensor(10.0))
 
-        return energy.item(), psnr.item()  # Python float
+        return mse_loss.item(), psnr.item()  # Python float
 
     def sampling(
         self,
@@ -95,8 +112,8 @@ class NeRFSampler:
         num_iters: int = 100,
         num_samples: int = 256,
         num_elites: int = 32,
-        init_trans_sigma: float = 0.15,
-        init_rot_sigma: float = 0.15,
+        init_trans_sigma: float = 0.3,
+        init_rot_sigma: float = 0.3,
         cov_shrink: float = 0.95,
     ):
         self.trainer.radiance_field.eval()
@@ -132,6 +149,14 @@ class NeRFSampler:
         best_E = float("inf")
         best_psnr = None
         current_level = 4.0
+
+        t_err_history = []
+        r_err_history = []
+        # Early stop setting
+        best_total_err = float("inf")
+        last_improve_iter = 0
+        patience = 15  # stop if no improvement for 10 iterations
+        min_improve = 1e-4  # required improvement to count as "better"
 
         for it in range(num_iters):
             # Cholesky for sampling
@@ -184,6 +209,25 @@ class NeRFSampler:
                 f"Translation error: {t_err.item():.4f}, Rotation error: {r_err.item():.4f} rad, PSNR: {best_psnr:.4f}"
             )
 
+            t_err_history.append(t_err.item())
+            r_err_history.append(r_err.item())
+
+            total_err = t_err.item() + r_err.item()
+            if total_err < best_total_err - min_improve:
+                best_total_err = total_err
+                last_improve_iter = it
+            else:
+                if it - last_improve_iter >= patience:
+                    print(
+                        f"[Early stop] No improvement for {patience} iterations. "
+                        f"Best total error: {best_total_err:.6f}"
+                    )
+                    break
+
+        output_dir = self.output_dir + "_sampling_wo"
+        test_images_dir = os.path.join(output_dir, f"{index}")
+        self._save_lists(t_err_history, r_err_history, test_images_dir)
+
     def _transformation_error(self, A, B):
         assert A.shape[-2:] == (4, 4) and B.shape[-2:] == (4, 4), (
             f"Expected [..., 4, 4], got {A.shape} and {B.shape}"
@@ -213,3 +257,12 @@ class NeRFSampler:
         rot_err = torch.acos(cos_theta)  # [...], radians
 
         return trans_err, rot_err
+
+    def _save_lists(self, list_a, list_b, outpath_folder):
+        out_dir = Path(outpath_folder)
+        out_dir.mkdir(parents=True, exist_ok=True)
+
+        # 1) Human-readable: JSON
+        json_path = out_dir / "lists.json"
+        with open(json_path, "w", encoding="utf-8") as f:
+            json.dump({"list_a": list_a, "list_b": list_b}, f, indent=2)
