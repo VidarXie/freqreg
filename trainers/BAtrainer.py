@@ -64,6 +64,8 @@ class BATrainer(NeRFTrainer):
             self.rerun_factor = 8.0
         self.rerun_step = 0
 
+        self.gt_mean = None
+
         print("=" * 20)
         print("Using BA trainer")
         print("=" * 20)
@@ -429,7 +431,12 @@ class BATrainer(NeRFTrainer):
         rgb_render = torch.clamp(rgb, min=eps)
         rgb_gt = torch.clamp(pixels, min=eps)
 
-        loss = torch.mean(-torch.log(rgb_render) * rgb_gt) / torch.mean(rgb_gt)
+        if self.gt_mean is None:
+            self.gt_mean = torch.mean(rgb_gt)
+        else:
+            self.gt_mean = 0.5 * self.gt_mean + 0.5 * torch.mean(rgb_gt)
+
+        loss = torch.mean(-torch.log(rgb_render) * rgb_gt) / self.gt_mean
         loss += torch.log(torch.mean(rgb_render))
         loss += (torch.mean(rgb_render) - torch.mean(rgb_gt)) ** 2
 

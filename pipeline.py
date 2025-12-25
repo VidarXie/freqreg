@@ -45,7 +45,7 @@ class NeRFPipeline:
         elif self.config.task == "nerf":
             self.trainer = NeRFTrainer(config)
             self.evaluator = NeRFEvaluator(self.trainer, save_images=True)
-            self.sampler = NeRFSampler(self.trainer)
+            # self.sampler = NeRFSampler(self.trainer)
 
         # Training history
         self.training_history = []
